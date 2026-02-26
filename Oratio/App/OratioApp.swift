@@ -150,6 +150,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return floatingPanel
     }
 
+    private func presentPanel(_ panel: FloatingPanel) {
+        if panel.isMiniaturized {
+            panel.deminiaturize(nil)
+        }
+        ensurePanelOnActiveScreen(panel)
+        activateForWindowPresentation()
+        panel.alphaValue = 1.0
+        panel.orderFrontRegardless()
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    private func recreateAndPresentPanel() {
+        floatingPanel?.orderOut(nil)
+        floatingPanel = nil
+        setupFloatingPanel()
+        guard let panel = floatingPanel else { return }
+        presentPanel(panel)
+        updatePanelVisibilityState()
+    }
+
     func activateForWindowPresentation() {
         NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -161,34 +181,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func showPanel() {
         guard let panel = getOrCreatePanel() else { return }
-        if panel.isMiniaturized {
-            panel.deminiaturize(nil)
-        }
-        ensurePanelOnActiveScreen(panel)
-        activateForWindowPresentation()
-        panel.alphaValue = 1.0
-        panel.orderFrontRegardless()
-        panel.makeKeyAndOrderFront(nil)
+        presentPanel(panel)
 
-        // 일부 환경에서 닫힘/숨김 이후 NSPanel이 다시 앞으로 올라오지 않는 경우를 대비해 재생성 fallback 적용
-        if !panel.isVisible {
-            logger.error("Panel reopen failed; recreating panel")
-            setupFloatingPanel()
-            guard let recreatedPanel = floatingPanel else { return }
-            ensurePanelOnActiveScreen(recreatedPanel)
-            activateForWindowPresentation()
-            recreatedPanel.orderFrontRegardless()
-            recreatedPanel.makeKeyAndOrderFront(nil)
-            updatePanelVisibilityState()
-            return
-        }
+        // 메뉴바 팝오버 닫힘/포커스 전환 이후에도 표시되는지 다음 런루프에서 재검증한다.
+        DispatchQueue.main.async { [weak self, weak panel] in
+            guard let self else { return }
+            if panel?.isVisible == true {
+                self.updatePanelVisibilityState()
+                return
+            }
 
-        updatePanelVisibilityState()
+            logger.error("Panel reopen failed after menu/action cycle; recreating panel")
+            self.recreateAndPresentPanel()
+        }
     }
 
     func hidePanel() {
         floatingPanel?.orderOut(nil)
         updatePanelVisibilityState()
+    }
+
+    func forceRecreateAndShowPanel() {
+        recreateAndPresentPanel()
     }
 
     func showSettings() {
@@ -290,15 +304,25 @@ struct MenuBarView: View {
     var body: some View {
         VStack {
             Button(panelVisible ? "패널 숨기기" : "패널 표시") {
-                if let appDelegate = NSApp.delegate as? AppDelegate {
-                    if appDelegate.isPanelActuallyVisible() {
-                        appDelegate.hidePanel()
-                    } else {
-                        appDelegate.showPanel()
+                DispatchQueue.main.async {
+                    if let appDelegate = NSApp.delegate as? AppDelegate {
+                        if appDelegate.isPanelActuallyVisible() {
+                            appDelegate.hidePanel()
+                        } else {
+                            appDelegate.showPanel()
+                        }
                     }
                 }
             }
             .keyboardShortcut("t", modifiers: [.command, .shift])
+
+            Button("패널 강제 복구") {
+                DispatchQueue.main.async {
+                    if let appDelegate = NSApp.delegate as? AppDelegate {
+                        appDelegate.forceRecreateAndShowPanel()
+                    }
+                }
+            }
 
             Divider()
 

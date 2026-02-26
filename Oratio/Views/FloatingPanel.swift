@@ -3,7 +3,7 @@ import AppKit
 
 /// NSPanel 기반 플로팅 패널
 /// 항상 위에 표시되며, 드래그 가능하고, 반투명 배경을 가진다.
-class FloatingPanel: NSPanel {
+class FloatingPanel: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
@@ -18,11 +18,10 @@ class FloatingPanel: NSPanel {
         // 패널 설정
         self.level = .floating
         self.isMovableByWindowBackground = true
-        self.titlebarAppearsTransparent = true
+        self.titlebarAppearsTransparent = false
         self.titleVisibility = .hidden
         self.isOpaque = false
-        self.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.92)
-        self.isFloatingPanel = true
+        self.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.97)
 
         // 패널이 키 윈도우가 되더라도 앱이 활성화되지 않도록
         self.hidesOnDeactivate = false
