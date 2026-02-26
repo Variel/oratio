@@ -6,6 +6,7 @@ struct TranslationEntry: Identifiable {
     let id: UUID
     var originalText: String          // 영어 원문
     var quickTranslation: String?     // 초벌 번역 (gemini-2.5-flash-lite)
+    var quickTranslationSourceText: String? // 현재 quickTranslation이 생성된 기준 원문
     var contextTranslation: String?   // 재벌 번역 (gemini-3-pro-preview)
     var timestamp: Date               // 생성 시간
     var isFinalized: Bool             // 문장 완성 여부
@@ -14,6 +15,7 @@ struct TranslationEntry: Identifiable {
         id: UUID = UUID(),
         originalText: String,
         quickTranslation: String? = nil,
+        quickTranslationSourceText: String? = nil,
         contextTranslation: String? = nil,
         timestamp: Date = Date(),
         isFinalized: Bool = false
@@ -21,6 +23,7 @@ struct TranslationEntry: Identifiable {
         self.id = id
         self.originalText = originalText
         self.quickTranslation = quickTranslation
+        self.quickTranslationSourceText = quickTranslationSourceText
         self.contextTranslation = contextTranslation
         self.timestamp = timestamp
         self.isFinalized = isFinalized

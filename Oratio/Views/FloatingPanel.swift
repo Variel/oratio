@@ -6,8 +6,8 @@ import AppKit
 class FloatingPanel: NSPanel {
     init<Content: View>(contentView: Content) {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 350),
-            styleMask: [.titled, .closable, .resizable, .nonactivatingPanel, .fullSizeContentView],
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 700),
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -18,7 +18,7 @@ class FloatingPanel: NSPanel {
         self.titlebarAppearsTransparent = true
         self.titleVisibility = .hidden
         self.isOpaque = false
-        self.backgroundColor = NSColor.clear
+        self.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.92)
 
         // 패널이 키 윈도우가 되더라도 앱이 활성화되지 않도록
         self.hidesOnDeactivate = false

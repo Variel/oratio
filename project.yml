@@ -2,14 +2,22 @@ name: Oratio
 options:
   bundleIdPrefix: ing.unlimit
   deploymentTarget:
-    macOS: "13.0"
+    macOS: "14.0"
   xcodeVersion: "16.0"
   generateEmptyDirectories: true
 
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+packages:
+  grpc-swift:
+    url: https://github.com/grpc/grpc-swift
+    from: "1.24.2"
+  swift-protobuf:
+    url: https://github.com/apple/swift-protobuf
+    from: "1.28.0"
 
 targets:
   Oratio:
@@ -39,3 +47,7 @@ targets:
       - sdk: ScreenCaptureKit.framework
       - sdk: Speech.framework
       - sdk: AVFoundation.framework
+      - package: grpc-swift
+        product: GRPC
+      - package: swift-protobuf
+        product: SwiftProtobuf

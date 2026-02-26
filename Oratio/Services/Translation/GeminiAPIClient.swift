@@ -15,7 +15,7 @@ enum GeminiAPIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .apiKeyMissing:
-            return "Gemini API 키가 설정되지 않았습니다. 설정에서 API 키를 입력해주세요."
+            return "Gemini API 키가 설정되지 않았습니다. 환경 변수(GOOGLE_GENERATIVE_AI_API_KEY)를 확인해주세요."
         case .invalidURL:
             return "잘못된 API URL입니다."
         case .networkError(let error):
@@ -130,6 +130,25 @@ struct GeminiErrorResponse: Decodable {
 final class GeminiAPIClient {
     private static let baseURL = "https://generativelanguage.googleapis.com/v1beta/models"
 
+    /// 디버그 로그를 파일에 기록
+    static func debugLog(_ message: String) {
+        let logFile = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("oratio_debug.log")
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let line = "[\(timestamp)] \(message)\n"
+        if let data = line.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: logFile.path) {
+                if let handle = try? FileHandle(forWritingTo: logFile) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
+                }
+            } else {
+                try? data.write(to: logFile)
+            }
+        }
+    }
+
     private let session: URLSession
 
     /// 지정된 타임아웃으로 클라이언트를 생성한다.
@@ -158,7 +177,9 @@ final class GeminiAPIClient {
     ) async throws -> String {
         // API 키 확인
         let apiKey = AppSettings.shared.geminiApiKey
+        GeminiAPIClient.debugLog("API 요청 시작 - model: \(model), apiKey 길이: \(apiKey.count), 앞4자: \(String(apiKey.prefix(4)))")
         guard !apiKey.isEmpty else {
+            GeminiAPIClient.debugLog("API 키 없음!")
             throw GeminiAPIError.apiKeyMissing
         }
 
@@ -216,6 +237,7 @@ final class GeminiAPIClient {
         } catch let error as URLError where error.code == .timedOut {
             throw GeminiAPIError.timeout
         } catch {
+            GeminiAPIClient.debugLog("네트워크 에러: \(error)")
             throw GeminiAPIError.networkError(error)
         }
 
@@ -230,6 +252,7 @@ final class GeminiAPIClient {
             } else {
                 errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
             }
+            GeminiAPIClient.debugLog("HTTP 에러 \(httpResponse.statusCode): \(errorMessage)")
             throw GeminiAPIError.httpError(
                 statusCode: httpResponse.statusCode,
                 message: errorMessage
@@ -241,6 +264,7 @@ final class GeminiAPIClient {
         do {
             geminiResponse = try JSONDecoder().decode(GeminiResponse.self, from: data)
         } catch {
+            GeminiAPIClient.debugLog("디코딩 에러: \(error), raw: \(String(data: data, encoding: .utf8) ?? "nil")")
             throw GeminiAPIError.decodingError(error)
         }
 

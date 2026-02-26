@@ -4,6 +4,7 @@ import SwiftUI
 /// 플로팅 패널 내에 표시되는 스크롤 가능한 번역 리스트
 struct TranslationView: View {
     @EnvironmentObject var appState: AppState
+    private var textScale: CGFloat { appState.textScale }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,7 +28,10 @@ struct TranslationView: View {
         }
         .frame(minWidth: 350, minHeight: 250)
         .background(
-            VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
+            ZStack {
+                VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
+                Color(nsColor: .windowBackgroundColor).opacity(0.55)
+            }
         )
     }
 
@@ -38,10 +42,10 @@ struct TranslationView: View {
             Image(systemName: "bubble.left.and.text.bubble.right")
                 .foregroundColor(.accentColor)
             Text("Oratio")
-                .font(.headline)
+                .font(.system(size: 17 * textScale, weight: .semibold))
             Spacer()
-            Text(appState.statusMessage)
-                .font(.caption)
+            Text(appState.orchestrator.isRunning ? "캡처 중" : "대기 중")
+                .font(.system(size: 12 * textScale))
                 .foregroundColor(.secondary)
         }
         .padding(.horizontal, 12)
@@ -54,13 +58,13 @@ struct TranslationView: View {
         VStack(spacing: 12) {
             Spacer()
             Image(systemName: "waveform.badge.mic")
-                .font(.system(size: 40))
+                .font(.system(size: 40 * textScale))
                 .foregroundColor(.secondary)
             Text("번역 대기 중")
-                .font(.title3)
+                .font(.system(size: 20 * textScale, weight: .medium))
                 .foregroundColor(.secondary)
             Text("번역을 시작하려면 \u{25B6} 버튼을 누르세요")
-                .font(.caption)
+                .font(.system(size: 12 * textScale))
                 .foregroundColor(.secondary)
             Spacer()
         }
@@ -74,7 +78,7 @@ struct TranslationView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     ForEach(appState.orchestrator.entries) { entry in
-                        TranslationEntryRow(entry: entry)
+                        TranslationEntryRow(entry: entry, textScale: textScale)
                             .id(entry.id)
                     }
                 }
@@ -96,6 +100,7 @@ struct TranslationView: View {
 
 struct TranslationEntryRow: View {
     let entry: TranslationEntry
+    let textScale: CGFloat
 
     /// 깜빡이는 애니메이션을 위한 상태
     @State private var isPulsing: Bool = false
@@ -104,20 +109,20 @@ struct TranslationEntryRow: View {
         VStack(alignment: .leading, spacing: 4) {
             // 원문 (영어) - 작은 폰트, 회색
             Text(entry.originalText)
-                .font(.system(size: 12))
+                .font(.system(size: 12 * textScale))
                 .foregroundColor(.secondary)
                 .lineLimit(2)
 
             // 번역 텍스트
             if let translation = entry.displayTranslation {
                 Text(translation)
-                    .font(.system(size: 15, weight: translationFontWeight))
+                    .font(.system(size: 15 * textScale, weight: translationFontWeight))
                     .foregroundColor(translationColor)
                     .opacity(translationOpacity)
             } else if !entry.originalText.isEmpty {
                 // 번역 대기 중 - 깜빡이는 상태
                 Text("번역 중...")
-                    .font(.system(size: 13))
+                    .font(.system(size: 13 * textScale))
                     .foregroundColor(.secondary)
                     .opacity(isPulsing ? 0.3 : 0.8)
                     .animation(
@@ -142,7 +147,7 @@ struct TranslationEntryRow: View {
         case .pending:
             return .secondary
         case .quickCompleted:
-            return .orange
+            return .secondary
         case .contextCompleted:
             return .primary
         }
@@ -175,7 +180,7 @@ struct TranslationEntryRow: View {
         case .pending:
             return Color.secondary.opacity(0.05)
         case .quickCompleted:
-            return Color.orange.opacity(0.08)
+            return Color.secondary.opacity(0.05)
         case .contextCompleted:
             return Color.green.opacity(0.08)
         }

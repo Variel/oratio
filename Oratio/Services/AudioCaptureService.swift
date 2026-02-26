@@ -84,7 +84,7 @@ class AudioCaptureService: NSObject, ObservableObject {
         qos: .userInteractive
     )
 
-    /// PCM 변환용 오디오 포맷
+    /// PCM 변환용 오디오 포맷 (16kHz 모노)
     private lazy var targetAudioFormat: AVAudioFormat? = {
         return AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -93,6 +93,9 @@ class AudioCaptureService: NSObject, ObservableObject {
             interleaved: false
         )
     }()
+
+    /// 48kHz → 16kHz 리샘플링 컨버터
+    private var audioConverter: AVAudioConverter?
 
     // MARK: - 권한 확인
 
@@ -328,6 +331,54 @@ class AudioCaptureService: NSObject, ObservableObject {
         return pcmBuffer
     }
 
+    // MARK: - 리샘플링
+
+    /// 소스 버퍼를 targetAudioFormat(16kHz 모노)으로 리샘플링한다.
+    private func resampleToTarget(_ sourceBuffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let targetFormat = targetAudioFormat else { return nil }
+
+        let sourceFormat = sourceBuffer.format
+
+        // 이미 같은 포맷이면 변환 불필요
+        if sourceFormat.sampleRate == targetFormat.sampleRate
+            && sourceFormat.channelCount == targetFormat.channelCount {
+            return nil
+        }
+
+        // 컨버터 생성 (최초 1회 또는 포맷 변경 시)
+        if audioConverter == nil || audioConverter?.inputFormat != sourceFormat {
+            audioConverter = AVAudioConverter(from: sourceFormat, to: targetFormat)
+        }
+        guard let converter = audioConverter else { return nil }
+
+        let ratio = targetFormat.sampleRate / sourceFormat.sampleRate
+        let outputFrameCount = AVAudioFrameCount(Double(sourceBuffer.frameLength) * ratio)
+        guard outputFrameCount > 0 else { return nil }
+
+        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputFrameCount) else {
+            return nil
+        }
+
+        var error: NSError?
+        var consumed = false
+        converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+            if consumed {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            consumed = true
+            outStatus.pointee = .haveData
+            return sourceBuffer
+        }
+
+        if let error = error {
+            print("[AudioCaptureService] 리샘플링 에러: \(error)")
+            return nil
+        }
+
+        return outputBuffer.frameLength > 0 ? outputBuffer : nil
+    }
+
     // MARK: - 오디오 레벨 계산
 
     /// PCM 버퍼에서 오디오 레벨(RMS)을 계산한다.
@@ -400,15 +451,23 @@ extension AudioCaptureService: SCStreamOutput {
         // 콜백 1: CMSampleBuffer 원본 전달
         onAudioSampleBuffer?(sampleBuffer)
 
-        // 콜백 2: AVAudioPCMBuffer로 변환하여 전달
+        // 콜백 2: AVAudioPCMBuffer로 변환 → 16kHz 리샘플링 후 전달
         if let pcmBuffer = Self.convertToAudioPCMBuffer(sampleBuffer) {
+            // 리샘플링 (48kHz → 16kHz)
+            let outputBuffer: AVAudioPCMBuffer
+            if let resampled = resampleToTarget(pcmBuffer) {
+                outputBuffer = resampled
+            } else {
+                outputBuffer = pcmBuffer
+            }
+
             // 오디오 레벨 업데이트
-            let level = calculateAudioLevel(from: pcmBuffer)
+            let level = calculateAudioLevel(from: outputBuffer)
             DispatchQueue.main.async { [weak self] in
                 self?.audioLevel = level
             }
 
-            onAudioPCMBuffer?(pcmBuffer)
+            onAudioPCMBuffer?(outputBuffer)
         }
     }
 }

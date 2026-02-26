@@ -4,6 +4,8 @@ import SwiftUI
 /// 번역 시작/정지 버튼, 오디오 레벨 미터, 상태 표시, 설정 버튼
 struct ControlBar: View {
     @EnvironmentObject var appState: AppState
+    @Environment(\.openSettings) private var openSettingsAction
+    private var textScale: CGFloat { appState.textScale }
 
     var body: some View {
         VStack(spacing: 6) {
@@ -12,9 +14,9 @@ struct ControlBar: View {
                 HStack(spacing: 4) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundColor(.red)
-                        .font(.caption2)
+                        .font(.system(size: 11 * textScale))
                     Text(errorMessage)
-                        .font(.caption2)
+                        .font(.system(size: 11 * textScale))
                         .foregroundColor(.red)
                         .lineLimit(2)
                 }
@@ -29,7 +31,7 @@ struct ControlBar: View {
                         Image(systemName: appState.orchestrator.isRunning ? "stop.fill" : "play.fill")
                             .foregroundColor(appState.orchestrator.isRunning ? .red : .green)
                         Text(appState.orchestrator.isRunning ? "정지" : "시작")
-                            .font(.subheadline.weight(.medium))
+                            .font(.system(size: 13 * textScale, weight: .medium))
                     }
                 }
                 .buttonStyle(.bordered)
@@ -42,7 +44,7 @@ struct ControlBar: View {
                             .fill(Color.red)
                             .frame(width: 6, height: 6)
                         Text("캡처 중")
-                            .font(.caption2)
+                            .font(.system(size: 10 * textScale))
                             .foregroundColor(.secondary)
 
                         // 오디오 레벨 미터
@@ -54,16 +56,11 @@ struct ControlBar: View {
                 Spacer()
 
                 // 설정 버튼
-                Button(action: openSettings) {
+                Button(action: openSettingsWindow) {
                     Image(systemName: "gear")
                 }
                 .buttonStyle(.borderless)
                 .help("설정")
-
-                // 항목 수
-                Text("\(appState.orchestrator.entries.count)개 항목")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -74,9 +71,13 @@ struct ControlBar: View {
         appState.toggleTranslation()
     }
 
-    private func openSettings() {
-        // 설정 창 열기
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    private func openSettingsWindow() {
+        DispatchQueue.main.async {
+            if let appDelegate = NSApp.delegate as? AppDelegate {
+                appDelegate.activateForWindowPresentation()
+            }
+            openSettingsAction()
+        }
     }
 }
 

@@ -4,7 +4,7 @@ import Foundation
 enum STTProviderType: String, CaseIterable, Identifiable {
     case apple = "Apple Speech"
     case whisper = "OpenAI Whisper"
-    case geminiLive = "Gemini Live"
+    case googleCloud = "Google Cloud Speech"
 
     var id: String { rawValue }
 }
@@ -17,6 +17,7 @@ class AppSettings: ObservableObject {
     private enum Keys {
         static let geminiApiKey = "geminiApiKey"
         static let openaiApiKey = "openaiApiKey"
+        static let googleCloudServiceAccountPath = "googleCloudServiceAccountPath"
         static let selectedSTTProvider = "selectedSTTProvider"
     }
 
@@ -29,6 +30,13 @@ class AppSettings: ObservableObject {
     @Published var openaiApiKey: String {
         didSet {
             UserDefaults.standard.set(openaiApiKey, forKey: Keys.openaiApiKey)
+        }
+    }
+
+    /// Google Cloud Service Account JSON 파일 경로
+    @Published var googleCloudServiceAccountPath: String {
+        didSet {
+            UserDefaults.standard.set(googleCloudServiceAccountPath, forKey: Keys.googleCloudServiceAccountPath)
         }
     }
 
@@ -48,6 +56,8 @@ class AppSettings: ObservableObject {
         self.openaiApiKey = storedOpenAIKey.isEmpty
             ? (ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? "")
             : storedOpenAIKey
+
+        self.googleCloudServiceAccountPath = UserDefaults.standard.string(forKey: Keys.googleCloudServiceAccountPath) ?? ""
 
         let providerRaw = UserDefaults.standard.string(forKey: Keys.selectedSTTProvider) ?? STTProviderType.apple.rawValue
         self.selectedSTTProvider = STTProviderType(rawValue: providerRaw) ?? .apple

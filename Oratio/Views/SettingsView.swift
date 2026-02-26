@@ -3,7 +3,6 @@ import SwiftUI
 /// API 키 설정 및 STT 제공자 선택 뷰
 struct SettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
-    @EnvironmentObject var appState: AppState
 
     var body: some View {
         TabView {
@@ -17,7 +16,6 @@ struct SettingsView: View {
                     Label("음성인식", systemImage: "waveform")
                 }
         }
-        .frame(width: 450, height: 300)
         .padding()
     }
 
@@ -25,18 +23,29 @@ struct SettingsView: View {
 
     private var apiKeySettingsView: some View {
         Form {
-            Section("Gemini API") {
-                SecureField("Gemini API Key", text: $settings.geminiApiKey)
-                    .textFieldStyle(.roundedBorder)
-                Text("gemini-2.5-flash-lite (초벌) 및 gemini-3-pro-preview (재벌) 번역에 사용")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
             Section("OpenAI API") {
                 SecureField("OpenAI API Key", text: $settings.openaiApiKey)
                     .textFieldStyle(.roundedBorder)
                 Text("Whisper STT 사용 시 필요")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Section("Google Cloud") {
+                HStack {
+                    TextField("Service Account JSON 파일 경로", text: $settings.googleCloudServiceAccountPath)
+                        .textFieldStyle(.roundedBorder)
+                    Button("선택") {
+                        selectServiceAccountFile()
+                    }
+                }
+                if !settings.googleCloudServiceAccountPath.isEmpty {
+                    let fileName = URL(fileURLWithPath: settings.googleCloudServiceAccountPath).lastPathComponent
+                    Text("선택됨: \(fileName)")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                }
+                Text("Google Cloud Speech-to-Text 사용 시 필요 (Service Account JSON)")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -73,18 +82,32 @@ struct SettingsView: View {
                         description: "최고 정확도, 청크 기반 처리.",
                         note: "OpenAI API 키 필요, 사용량에 따라 과금"
                     )
-                case .geminiLive:
+                case .googleCloud:
                     providerDescription(
-                        icon: "bolt",
-                        title: "Gemini Live API",
-                        description: "스트리밍 지원, 빠른 응답.",
-                        note: "Gemini API 키 필요"
+                        icon: "globe",
+                        title: "Google Cloud Speech-to-Text",
+                        description: "gRPC 스트리밍, 자동 구두점, 높은 정확도.",
+                        note: "Service Account JSON 파일 필요, Speech-to-Text API 활성화 필요"
                     )
                 }
             }
         }
         .formStyle(.grouped)
         .padding()
+    }
+
+    // MARK: - 파일 선택
+
+    private func selectServiceAccountFile() {
+        let panel = NSOpenPanel()
+        panel.title = "Service Account JSON 파일 선택"
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+
+        if panel.runModal() == .OK, let url = panel.url {
+            settings.googleCloudServiceAccountPath = url.path
+        }
     }
 
     private func providerDescription(icon: String, title: String, description: String, note: String) -> some View {
