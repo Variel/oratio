@@ -148,7 +148,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         let panel = FloatingPanel(contentView: contentView)
         panel.delegate = self
-        panel.collectionBehavior = [.canJoinAllSpaces, .moveToActiveSpace, .fullScreenAuxiliary]
+        // NSWindow에서 조합 제약이 있는 옵션을 피하고, 현재 스페이스로만 이동시킨다.
+        panel.collectionBehavior = [.moveToActiveSpace]
         floatingPanel = panel
         updatePanelVisibilityState()
     }
