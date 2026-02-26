@@ -187,6 +187,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
     }
+
+    /// 닫기 버튼 클릭 시 실제 close 대신 숨김 처리하여
+    /// 메뉴바에서 항상 다시 열 수 있도록 보장한다.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard sender === floatingPanel else { return true }
+        hidePanel()
+        return false
+    }
 }
 
 // MARK: - Menu Bar View
