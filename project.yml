@@ -1,6 +1,6 @@
-name: LiveTranslator
+name: Oratio
 options:
-  bundleIdPrefix: com.channy
+  bundleIdPrefix: ing.unlimit
   deploymentTarget:
     macOS: "13.0"
   xcodeVersion: "16.0"
@@ -12,21 +12,21 @@ settings:
     MACOSX_DEPLOYMENT_TARGET: "13.0"
 
 targets:
-  LiveTranslator:
+  Oratio:
     type: application
     platform: macOS
     sources:
-      - path: LiveTranslator
+      - path: Oratio
         excludes:
           - "**/*.entitlements"
     resources:
-      - path: LiveTranslator/Resources/Assets.xcassets
+      - path: Oratio/Resources/Assets.xcassets
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.channy.LiveTranslator
-        PRODUCT_NAME: LiveTranslator
-        INFOPLIST_FILE: LiveTranslator/Info.plist
-        CODE_SIGN_ENTITLEMENTS: LiveTranslator/LiveTranslator.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: ing.unlimit.oratio
+        PRODUCT_NAME: Oratio
+        INFOPLIST_FILE: Oratio/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Oratio/Oratio.entitlements
         CODE_SIGN_IDENTITY: "Apple Development"
         DEVELOPMENT_TEAM: KMDVJDU523
         CODE_SIGNING_REQUIRED: "YES"

@@ -25,10 +25,10 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>LiveTranslator가 화상회의의 시스템 오디오를 캡처하여 실시간 번역을 제공하기 위해 화면 녹화 권한이 필요합니다.</string>
+	<string>Oratio가 화상회의의 시스템 오디오를 캡처하여 실시간 번역을 제공하기 위해 화면 녹화 권한이 필요합니다.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>LiveTranslator가 캡처된 오디오를 텍스트로 변환하기 위해 음성 인식 권한이 필요합니다.</string>
+	<string>Oratio가 캡처된 오디오를 텍스트로 변환하기 위해 음성 인식 권한이 필요합니다.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>LiveTranslator가 오디오 처리를 위해 마이크 접근 권한이 필요합니다.</string>
+	<string>Oratio가 오디오 처리를 위해 마이크 접근 권한이 필요합니다.</string>
 </dict>
 </plist>

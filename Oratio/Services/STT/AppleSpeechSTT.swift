@@ -45,7 +45,7 @@ class AppleSpeechSTT: STTProvider {
 
     /// 스레드 안전을 위한 큐
     private let processingQueue = DispatchQueue(
-        label: "com.channy.LiveTranslator.AppleSpeechSTT",
+        label: "ing.unlimit.oratio.AppleSpeechSTT",
         qos: .userInteractive
     )
 

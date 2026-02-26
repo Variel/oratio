@@ -2,7 +2,7 @@ import SwiftUI
 import os.log
 
 // [E2E 테스트용] 파일 기반 로그 - 앱이 open 명령으로 실행될 때도 로그를 확인할 수 있도록
-private let e2eLogger = OSLog(subsystem: "com.channy.LiveTranslator", category: "E2E")
+private let e2eLogger = OSLog(subsystem: "ing.unlimit.oratio", category: "E2E")
 
 func e2eLog(_ message: String) {
     let timestamp = ISO8601DateFormatter().string(from: Date())
@@ -10,7 +10,7 @@ func e2eLog(_ message: String) {
     print(line, terminator: "")  // stdout/stderr 로도 출력
     os_log(.default, log: e2eLogger, "%{public}@", message)
     // 파일에도 기록
-    let logPath = "/tmp/livetranslator_app.log"
+    let logPath = "/tmp/oratio_app.log"
     if let data = line.data(using: .utf8) {
         if FileManager.default.fileExists(atPath: logPath) {
             if let handle = FileHandle(forWritingAtPath: logPath) {
@@ -25,11 +25,11 @@ func e2eLog(_ message: String) {
 }
 
 @main
-struct LiveTranslatorApp: App {
+struct OratioApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("LiveTranslator", systemImage: "bubble.left.and.text.bubble.right") {
+        MenuBarExtra("Oratio", systemImage: "bubble.left.and.text.bubble.right") {
             MenuBarView()
                 .environmentObject(appDelegate.appState)
         }

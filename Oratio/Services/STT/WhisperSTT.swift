@@ -53,7 +53,7 @@ class WhisperSTT: STTProvider, @unchecked Sendable {
 
     /// 스레드 안전을 위한 큐
     private let processingQueue = DispatchQueue(
-        label: "com.channy.LiveTranslator.WhisperSTT",
+        label: "ing.unlimit.oratio.WhisperSTT",
         qos: .userInteractive
     )
 

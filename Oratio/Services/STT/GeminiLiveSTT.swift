@@ -63,7 +63,7 @@ class GeminiLiveSTT: STTProvider {
 
     /// 스레드 안전을 위한 큐
     private let processingQueue = DispatchQueue(
-        label: "com.channy.LiveTranslator.GeminiLiveSTT",
+        label: "ing.unlimit.oratio.GeminiLiveSTT",
         qos: .userInteractive
     )
 

@@ -24,7 +24,7 @@ enum AudioCaptureError: LocalizedError {
         case .noShareableContent:
             return "캡처 가능한 콘텐츠를 찾을 수 없습니다."
         case .permissionDenied:
-            return "화면 녹화 권한이 거부되었습니다. 시스템 설정 > 개인 정보 보호 및 보안 > 화면 녹화에서 LiveTranslator를 허용해 주세요."
+            return "화면 녹화 권한이 거부되었습니다. 시스템 설정 > 개인 정보 보호 및 보안 > 화면 녹화에서 Oratio를 허용해 주세요."
         case .streamCreationFailed(let error):
             return "오디오 스트림 생성 실패: \(error.localizedDescription)"
         case .streamStartFailed(let error):
@@ -80,7 +80,7 @@ class AudioCaptureService: NSObject, ObservableObject {
 
     /// 오디오 스트림 출력 처리를 위한 전용 디스패치 큐
     private let audioCaptureQueue = DispatchQueue(
-        label: "com.channy.LiveTranslator.audioCaptureQueue",
+        label: "ing.unlimit.oratio.audioCaptureQueue",
         qos: .userInteractive
     )
 
@@ -154,7 +154,7 @@ class AudioCaptureService: NSObject, ObservableObject {
             throw AudioCaptureError.noShareableContent
         }
 
-        // 전체 디스플레이의 오디오를 캡처하되, 자기 자신(LiveTranslator)의 오디오는 제외
+        // 전체 디스플레이의 오디오를 캡처하되, 자기 자신(Oratio)의 오디오는 제외
         let selfApp = content.applications.filter {
             $0.bundleIdentifier == Bundle.main.bundleIdentifier
         }

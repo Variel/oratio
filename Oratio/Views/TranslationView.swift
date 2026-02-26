@@ -37,7 +37,7 @@ struct TranslationView: View {
         HStack {
             Image(systemName: "bubble.left.and.text.bubble.right")
                 .foregroundColor(.accentColor)
-            Text("LiveTranslator")
+            Text("Oratio")
                 .font(.headline)
             Spacer()
             Text(appState.statusMessage)
