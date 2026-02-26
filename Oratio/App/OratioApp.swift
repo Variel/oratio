@@ -138,7 +138,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         let panel = FloatingPanel(contentView: contentView)
         panel.delegate = self
+        panel.collectionBehavior = [.canJoinAllSpaces, .moveToActiveSpace, .fullScreenAuxiliary]
         floatingPanel = panel
+        updatePanelVisibilityState()
     }
 
     private func getOrCreatePanel() -> FloatingPanel? {
@@ -149,16 +151,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func activateForWindowPresentation() {
+        NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func togglePanel() {
-        let isVisible = appState.isPanelVisible || (floatingPanel?.isVisible ?? false)
-        if isVisible {
-            hidePanel()
-        } else {
-            showPanel()
-        }
+    func isPanelActuallyVisible() -> Bool {
+        floatingPanel?.isVisible == true
     }
 
     func showPanel() {
@@ -166,7 +164,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if panel.isMiniaturized {
             panel.deminiaturize(nil)
         }
+        ensurePanelOnActiveScreen(panel)
         activateForWindowPresentation()
+        panel.alphaValue = 1.0
         panel.orderFrontRegardless()
         panel.makeKeyAndOrderFront(nil)
 
@@ -175,19 +175,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             logger.error("Panel reopen failed; recreating panel")
             setupFloatingPanel()
             guard let recreatedPanel = floatingPanel else { return }
+            ensurePanelOnActiveScreen(recreatedPanel)
             activateForWindowPresentation()
             recreatedPanel.orderFrontRegardless()
             recreatedPanel.makeKeyAndOrderFront(nil)
-            appState.isPanelVisible = recreatedPanel.isVisible
+            updatePanelVisibilityState()
             return
         }
 
-        appState.isPanelVisible = panel.isVisible
+        updatePanelVisibilityState()
     }
 
     func hidePanel() {
         floatingPanel?.orderOut(nil)
-        appState.isPanelVisible = false
+        updatePanelVisibilityState()
     }
 
     func showSettings() {
@@ -203,7 +204,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         if let window = notification.object as? NSWindow {
             if window === floatingPanel {
-                appState.isPanelVisible = false
+                updatePanelVisibilityState()
             }
         }
     }
@@ -217,10 +218,63 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag || !(floatingPanel?.isVisible ?? false) {
+        if !flag || !isPanelActuallyVisible() {
             showPanel()
         }
         return true
+    }
+
+    private func updatePanelVisibilityState() {
+        appState.isPanelVisible = isPanelActuallyVisible()
+    }
+
+    private func ensurePanelOnActiveScreen(_ panel: NSWindow) {
+        let targetScreen = NSScreen.main ?? panel.screen ?? NSScreen.screens.first
+        guard let screen = targetScreen else { return }
+
+        // 메뉴바/독 영역과 너무 붙지 않도록 여유를 둔다.
+        var visibleFrame = screen.visibleFrame.insetBy(dx: 20, dy: 20)
+        if visibleFrame.width < 300 || visibleFrame.height < 250 {
+            visibleFrame = screen.visibleFrame
+        }
+
+        var frame = panel.frame
+
+        if frame.width > visibleFrame.width {
+            frame.size.width = visibleFrame.width
+        }
+        if frame.height > visibleFrame.height {
+            frame.size.height = visibleFrame.height
+        }
+
+        if !visibleFrame.intersects(frame) {
+            frame.origin.x = visibleFrame.midX - frame.width / 2
+            frame.origin.y = visibleFrame.midY - frame.height / 2
+            panel.setFrame(frame, display: false)
+            return
+        }
+
+        var changed = false
+        if frame.minX < visibleFrame.minX {
+            frame.origin.x = visibleFrame.minX
+            changed = true
+        }
+        if frame.maxX > visibleFrame.maxX {
+            frame.origin.x = visibleFrame.maxX - frame.width
+            changed = true
+        }
+        if frame.minY < visibleFrame.minY {
+            frame.origin.y = visibleFrame.minY
+            changed = true
+        }
+        if frame.maxY > visibleFrame.maxY {
+            frame.origin.y = visibleFrame.maxY - frame.height
+            changed = true
+        }
+
+        if changed {
+            panel.setFrame(frame, display: false)
+        }
     }
 }
 
@@ -229,12 +283,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 struct MenuBarView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.openSettings) private var openSettingsAction
+    private var panelVisible: Bool {
+        (NSApp.delegate as? AppDelegate)?.isPanelActuallyVisible() ?? appState.isPanelVisible
+    }
 
     var body: some View {
         VStack {
-            Button(appState.isPanelVisible ? "패널 숨기기" : "패널 표시") {
+            Button(panelVisible ? "패널 숨기기" : "패널 표시") {
                 if let appDelegate = NSApp.delegate as? AppDelegate {
-                    appDelegate.togglePanel()
+                    if appDelegate.isPanelActuallyVisible() {
+                        appDelegate.hidePanel()
+                    } else {
+                        appDelegate.showPanel()
+                    }
                 }
             }
             .keyboardShortcut("t", modifiers: [.command, .shift])
