@@ -141,13 +141,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         floatingPanel = panel
     }
 
+    private func getOrCreatePanel() -> FloatingPanel? {
+        if floatingPanel == nil {
+            setupFloatingPanel()
+        }
+        return floatingPanel
+    }
+
     func activateForWindowPresentation() {
         NSApp.activate(ignoringOtherApps: true)
     }
 
     func togglePanel() {
-        guard let panel = floatingPanel else { return }
-        if panel.isVisible {
+        let isVisible = appState.isPanelVisible || (floatingPanel?.isVisible ?? false)
+        if isVisible {
             hidePanel()
         } else {
             showPanel()
@@ -155,14 +162,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func showPanel() {
-        guard let panel = floatingPanel else { return }
+        guard let panel = getOrCreatePanel() else { return }
         if panel.isMiniaturized {
             panel.deminiaturize(nil)
         }
         activateForWindowPresentation()
-        panel.makeKeyAndOrderFront(nil)
         panel.orderFrontRegardless()
-        appState.isPanelVisible = true
+        panel.makeKeyAndOrderFront(nil)
+
+        // 일부 환경에서 닫힘/숨김 이후 NSPanel이 다시 앞으로 올라오지 않는 경우를 대비해 재생성 fallback 적용
+        if !panel.isVisible {
+            logger.error("Panel reopen failed; recreating panel")
+            setupFloatingPanel()
+            guard let recreatedPanel = floatingPanel else { return }
+            activateForWindowPresentation()
+            recreatedPanel.orderFrontRegardless()
+            recreatedPanel.makeKeyAndOrderFront(nil)
+            appState.isPanelVisible = recreatedPanel.isVisible
+            return
+        }
+
+        appState.isPanelVisible = panel.isVisible
     }
 
     func hidePanel() {
@@ -194,6 +214,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard sender === floatingPanel else { return true }
         hidePanel()
         return false
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag || !(floatingPanel?.isVisible ?? false) {
+            showPanel()
+        }
+        return true
     }
 }
 
