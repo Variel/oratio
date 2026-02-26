@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// NSPanel 기반 플로팅 패널
+/// NSWindow 기반 플로팅 창
 /// 항상 위에 표시되며, 드래그 가능하고, 반투명 배경을 가진다.
 class FloatingPanel: NSWindow {
     override var canBecomeKey: Bool { true }
