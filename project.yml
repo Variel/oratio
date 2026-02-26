@@ -1,0 +1,41 @@
+name: LiveTranslator
+options:
+  bundleIdPrefix: com.channy
+  deploymentTarget:
+    macOS: "13.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+
+targets:
+  LiveTranslator:
+    type: application
+    platform: macOS
+    sources:
+      - path: LiveTranslator
+        excludes:
+          - "**/*.entitlements"
+    resources:
+      - path: LiveTranslator/Resources/Assets.xcassets
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.channy.LiveTranslator
+        PRODUCT_NAME: LiveTranslator
+        INFOPLIST_FILE: LiveTranslator/Info.plist
+        CODE_SIGN_ENTITLEMENTS: LiveTranslator/LiveTranslator.entitlements
+        CODE_SIGN_IDENTITY: "Apple Development"
+        DEVELOPMENT_TEAM: KMDVJDU523
+        CODE_SIGNING_REQUIRED: "YES"
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_APP_SANDBOX: "NO"
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+        COMBINE_HIDPI_IMAGES: "YES"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    dependencies:
+      - sdk: ScreenCaptureKit.framework
+      - sdk: Speech.framework
+      - sdk: AVFoundation.framework
