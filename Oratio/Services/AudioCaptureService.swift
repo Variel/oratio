@@ -132,7 +132,6 @@ class AudioCaptureService: NSObject, ObservableObject {
         } catch {
             let nsError = error as NSError
             print("[AudioCaptureService] SCShareableContent 에러: domain=\(nsError.domain) code=\(nsError.code) desc=\(nsError.localizedDescription)")
-            e2eLog("[E2E-TEST] SCShareableContent 에러 상세: domain=\(nsError.domain) code=\(nsError.code) desc=\(nsError.localizedDescription)")
             if nsError.code == -3801 {
                 await MainActor.run {
                     self.lastError = .permissionDenied
@@ -175,8 +174,6 @@ class AudioCaptureService: NSObject, ObservableObject {
         configuration.excludesCurrentProcessAudio = true // 자기 자신의 오디오 제외
         configuration.sampleRate = 48000  // 시스템 기본값 사용 (STT 변환은 별도 처리)
         configuration.channelCount = 2     // 스테레오 (시스템 기본값)
-
-        e2eLog("[E2E-TEST] SCStream 설정: display=\(display.width)x\(display.height), sampleRate=48000, channels=2")
 
         // 4. SCStream 생성
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)

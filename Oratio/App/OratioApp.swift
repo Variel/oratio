@@ -1,28 +1,7 @@
 import SwiftUI
 import os.log
 
-// [E2E 테스트용] 파일 기반 로그 - 앱이 open 명령으로 실행될 때도 로그를 확인할 수 있도록
-private let e2eLogger = OSLog(subsystem: "ing.unlimit.oratio", category: "E2E")
-
-func e2eLog(_ message: String) {
-    let timestamp = ISO8601DateFormatter().string(from: Date())
-    let line = "[\(timestamp)] \(message)\n"
-    print(line, terminator: "")  // stdout/stderr 로도 출력
-    os_log(.default, log: e2eLogger, "%{public}@", message)
-    // 파일에도 기록
-    let logPath = "/tmp/oratio_app.log"
-    if let data = line.data(using: .utf8) {
-        if FileManager.default.fileExists(atPath: logPath) {
-            if let handle = FileHandle(forWritingAtPath: logPath) {
-                handle.seekToEndOfFile()
-                handle.write(data)
-                handle.closeFile()
-            }
-        } else {
-            FileManager.default.createFile(atPath: logPath, contents: data)
-        }
-    }
-}
+private let logger = Logger(subsystem: "ing.unlimit.oratio", category: "App")
 
 @main
 struct OratioApp: App {

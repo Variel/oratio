@@ -102,7 +102,7 @@ class TranslationOrchestrator: ObservableObject {
             try await audioCaptureService.startCapture()
         } catch {
             errorMessage = "오디오 캡처 시작 실패: \(error.localizedDescription)"
-            e2eLog("[E2E-TEST] 오디오 캡처 에러: \(error)")
+            print("[Oratio] 오디오 캡처 에러: \(error)")
             cleanup()
             return
         }
@@ -112,15 +112,15 @@ class TranslationOrchestrator: ObservableObject {
             try await provider.startRecognition()
         } catch {
             errorMessage = "음성 인식 시작 실패: \(error.localizedDescription)"
-            e2eLog("[E2E-TEST] STT 시작 에러: \(error)")
+            print("[Oratio] STT 시작 에러: \(error)")
             audioCaptureService.stopCapture()
             cleanup()
             return
         }
 
         isRunning = true
-        e2eLog("[E2E-TEST] ===== 파이프라인 시작 완료 (STT: \(provider.name)) =====")
-        e2eLog("[E2E-TEST] 오디오 캡처 시작됨, STT 인식 시작됨, 번역 대기 중...")
+        print("[Oratio] ===== 파이프라인 시작 완료 (STT: \(provider.name)) =====")
+        print("[Oratio] 오디오 캡처 시작됨, STT 인식 시작됨, 번역 대기 중...")
     }
 
     /// 전체 파이프라인을 정지한다.
@@ -216,7 +216,7 @@ class TranslationOrchestrator: ObservableObject {
     func handlePartialResult(_ text: String) {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else { return }
-        e2eLog("[E2E-TEST] STT 부분 결과: \"\(trimmedText)\"")
+        print("[Oratio] STT 부분 결과: \"\(trimmedText)\"")
 
         if let existingID = currentPartialEntryID,
            let index = entries.firstIndex(where: { $0.id == existingID }) {
@@ -250,7 +250,7 @@ class TranslationOrchestrator: ObservableObject {
             guard let self = self else { return }
             // 아직 부분 결과 상태라면 최종 결과로 승격
             if self.currentPartialEntryID != nil {
-                e2eLog("[E2E-TEST] 침묵 감지 (\(self.silenceTimeout)초) - 부분 결과를 최종 결과로 전환")
+                print("[Oratio] 침묵 감지 (\(self.silenceTimeout)초) - 부분 결과를 최종 결과로 전환")
                 self.handleFinalResult(lastText)
             }
         }
@@ -265,7 +265,7 @@ class TranslationOrchestrator: ObservableObject {
     func handleFinalResult(_ text: String) {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else { return }
-        e2eLog("[E2E-TEST] STT 최종 결과: \"\(trimmedText)\"")
+        print("[Oratio] STT 최종 결과: \"\(trimmedText)\"")
 
         // 진행 중인 초벌 번역 취소
         quickTranslationTask?.cancel()
@@ -334,12 +334,12 @@ class TranslationOrchestrator: ObservableObject {
                 // 결과 반영
                 if let index = self.entries.firstIndex(where: { $0.id == targetID }) {
                     self.entries[index].quickTranslation = translation
-                    e2eLog("[E2E-TEST] 초벌 번역 완료 (소요: \(String(format: "%.2f", elapsed))초): \"\(text)\" -> \"\(translation)\"")
+                    print("[Oratio] 초벌 번역 완료 (소요: \(String(format: "%.2f", elapsed))초): \"\(text)\" -> \"\(translation)\"")
                 }
             } catch {
                 guard !Task.isCancelled else { return }
                 let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-                e2eLog("[E2E-TEST] 초벌 번역 에러 (소요: \(String(format: "%.2f", elapsed))초): \(error.localizedDescription)")
+                print("[Oratio] 초벌 번역 에러 (소요: \(String(format: "%.2f", elapsed))초): \(error.localizedDescription)")
                 // 초벌 번역 에러는 개별 엔트리에만 영향, 전체 파이프라인은 유지
             }
         }
@@ -375,7 +375,7 @@ class TranslationOrchestrator: ObservableObject {
                 // 결과 반영
                 if let index = self.entries.firstIndex(where: { $0.id == entryID }) {
                     self.entries[index].contextTranslation = translation
-                    e2eLog("[E2E-TEST] 재벌 번역 완료 (소요: \(String(format: "%.2f", elapsed))초): \"\(text)\" -> \"\(translation)\"")
+                    print("[Oratio] 재벌 번역 완료 (소요: \(String(format: "%.2f", elapsed))초): \"\(text)\" -> \"\(translation)\"")
 
                     // 맥락 히스토리에 추가
                     self.addToContextHistory(source: text, translation: translation)
@@ -383,7 +383,7 @@ class TranslationOrchestrator: ObservableObject {
             } catch {
                 guard !Task.isCancelled else { return }
                 let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-                e2eLog("[E2E-TEST] 재벌 번역 에러 (소요: \(String(format: "%.2f", elapsed))초): \(error.localizedDescription)")
+                print("[Oratio] 재벌 번역 에러 (소요: \(String(format: "%.2f", elapsed))초): \(error.localizedDescription)")
                 // 재벌 번역 에러 시, 초벌 번역이 있으면 그대로 유지
                 // 초벌 번역도 없으면 에러 표시
                 if let index = self.entries.firstIndex(where: { $0.id == entryID }),
