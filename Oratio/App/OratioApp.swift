@@ -136,6 +136,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        if !isPanelActuallyVisible() {
+            showPanel()
+        }
+    }
+
     private func setupFloatingPanel() {
         let contentView = TranslationView()
             .environmentObject(appState)
