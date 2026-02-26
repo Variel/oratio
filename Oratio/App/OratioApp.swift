@@ -10,7 +10,7 @@ struct OratioApp: App {
 
     var body: some Scene {
         MenuBarExtra("Oratio", systemImage: "bubble.left.and.text.bubble.right") {
-            MenuBarView()
+            MenuBarView(appDelegate: appDelegate)
                 .environmentObject(appDelegate.appState)
         }
         .commands {
@@ -130,6 +130,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.setActivationPolicy(.regular)
         setupFloatingPanel()
         showPanel()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self, !self.isPanelActuallyVisible() else { return }
+            self.showPanel()
+        }
     }
 
     private func setupFloatingPanel() {
@@ -242,18 +246,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appState.isPanelVisible = isPanelActuallyVisible()
     }
 
-    private func ensurePanelOnActiveScreen(_ panel: NSWindow) {
-        let targetScreen = NSScreen.main ?? panel.screen ?? NSScreen.screens.first
-        guard let screen = targetScreen else { return }
+    private func activePresentationScreen(fallback window: NSWindow?) -> NSScreen? {
+        let mouseLocation = NSEvent.mouseLocation
+        if let mouseScreen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) {
+            return mouseScreen
+        }
+        return NSApp.keyWindow?.screen ?? NSScreen.main ?? window?.screen ?? NSScreen.screens.first
+    }
 
-        // 메뉴바/독 영역과 너무 붙지 않도록 여유를 둔다.
+    private func ensurePanelOnActiveScreen(_ panel: NSWindow) {
+        guard let screen = activePresentationScreen(fallback: panel) else { return }
+
+        // 항상 현재 작업 화면 중앙으로 강제 배치해 오프스크린/다른 스페이스 잔류를 방지한다.
         var visibleFrame = screen.visibleFrame.insetBy(dx: 20, dy: 20)
         if visibleFrame.width < 300 || visibleFrame.height < 250 {
             visibleFrame = screen.visibleFrame
         }
 
         var frame = panel.frame
-
         if frame.width > visibleFrame.width {
             frame.size.width = visibleFrame.width
         }
@@ -261,56 +271,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             frame.size.height = visibleFrame.height
         }
 
-        if !visibleFrame.intersects(frame) {
-            frame.origin.x = visibleFrame.midX - frame.width / 2
-            frame.origin.y = visibleFrame.midY - frame.height / 2
-            panel.setFrame(frame, display: false)
-            return
-        }
-
-        var changed = false
-        if frame.minX < visibleFrame.minX {
-            frame.origin.x = visibleFrame.minX
-            changed = true
-        }
-        if frame.maxX > visibleFrame.maxX {
-            frame.origin.x = visibleFrame.maxX - frame.width
-            changed = true
-        }
-        if frame.minY < visibleFrame.minY {
-            frame.origin.y = visibleFrame.minY
-            changed = true
-        }
-        if frame.maxY > visibleFrame.maxY {
-            frame.origin.y = visibleFrame.maxY - frame.height
-            changed = true
-        }
-
-        if changed {
-            panel.setFrame(frame, display: false)
-        }
+        frame.origin.x = visibleFrame.midX - (frame.width / 2)
+        frame.origin.y = visibleFrame.midY - (frame.height / 2)
+        panel.setFrame(frame, display: false)
     }
 }
 
 // MARK: - Menu Bar View
 
 struct MenuBarView: View {
+    let appDelegate: AppDelegate
     @EnvironmentObject var appState: AppState
     @Environment(\.openSettings) private var openSettingsAction
     private var panelVisible: Bool {
-        (NSApp.delegate as? AppDelegate)?.isPanelActuallyVisible() ?? appState.isPanelVisible
+        appDelegate.isPanelActuallyVisible()
     }
 
     var body: some View {
         VStack {
             Button(panelVisible ? "패널 숨기기" : "패널 표시") {
                 DispatchQueue.main.async {
-                    if let appDelegate = NSApp.delegate as? AppDelegate {
-                        if appDelegate.isPanelActuallyVisible() {
-                            appDelegate.hidePanel()
-                        } else {
-                            appDelegate.showPanel()
-                        }
+                    if appDelegate.isPanelActuallyVisible() {
+                        appDelegate.hidePanel()
+                    } else {
+                        appDelegate.showPanel()
                     }
                 }
             }
@@ -318,9 +302,7 @@ struct MenuBarView: View {
 
             Button("패널 강제 복구") {
                 DispatchQueue.main.async {
-                    if let appDelegate = NSApp.delegate as? AppDelegate {
-                        appDelegate.forceRecreateAndShowPanel()
-                    }
+                    appDelegate.forceRecreateAndShowPanel()
                 }
             }
 
@@ -340,9 +322,7 @@ struct MenuBarView: View {
 
             Button("설정...") {
                 DispatchQueue.main.async {
-                    if let appDelegate = NSApp.delegate as? AppDelegate {
-                        appDelegate.activateForWindowPresentation()
-                    }
+                    appDelegate.activateForWindowPresentation()
                     openSettingsAction()
                 }
             }
