@@ -29,19 +29,27 @@ enum SonioxError: LocalizedError {
     }
 }
 
-// MARK: - Soniox 토큰 업데이트 콜백 데이터
+// MARK: - Soniox 콜백 데이터
 
-struct SonioxTokenUpdate {
+struct SonioxUpdate {
+    /// 원문 (original) 안정 텍스트
     let stableText: String
+    /// 원문 (original) 불안정 텍스트
     let unstableText: String
+    /// 번역 안정 텍스트
+    let stableTranslation: String
+    /// 번역 불안정 텍스트
+    let unstableTranslation: String
+    /// 화자 ID
     let speaker: String?
+    /// endpoint 감지 여부
     let isEndpoint: Bool
 }
 
 // MARK: - SonioxSTT
 
-/// Soniox 실시간 WebSocket 기반 음성 인식 서비스
-/// wss://stt-rt.soniox.com/transcribe-websocket 에 직접 연결하여 스트리밍 STT를 수행한다.
+/// Soniox 실시간 WebSocket 기반 음성 인식 + 번역 서비스
+/// STT와 번역을 동시에 수행하여 원문과 번역을 실시간으로 제공한다.
 actor SonioxSTT {
     // MARK: - 상수
 
@@ -54,7 +62,7 @@ actor SonioxSTT {
 
     // MARK: - 콜백
 
-    private var onTokenUpdate: ((SonioxTokenUpdate) -> Void)?
+    private var onUpdate: ((SonioxUpdate) -> Void)?
     private var onError: ((Error) -> Void)?
 
     // MARK: - WebSocket 상태
@@ -72,14 +80,19 @@ actor SonioxSTT {
     private var isClosing = false
     private var hasFinished = false
 
-    // MARK: - 텍스트 상태
+    // MARK: - 텍스트 상태 (원문)
 
-    private var stableText = ""
-    private var unstableText = ""
+    private var stableOriginal = ""
+    private var unstableOriginal = ""
+
+    // MARK: - 텍스트 상태 (번역)
+
+    private var stableTranslation = ""
+    private var unstableTranslation = ""
+
+    // MARK: - 기타 상태
+
     private var currentSpeaker: String?
-
-    // MARK: - Finalization
-
     private var finishContinuation: CheckedContinuation<Void, Error>?
 
     init(urlSession: URLSession = .shared) {
@@ -89,10 +102,10 @@ actor SonioxSTT {
     // MARK: - 핸들러 설정
 
     func setHandlers(
-        onTokenUpdate: ((SonioxTokenUpdate) -> Void)?,
+        onUpdate: ((SonioxUpdate) -> Void)?,
         onError: ((Error) -> Void)?
     ) {
-        self.onTokenUpdate = onTokenUpdate
+        self.onUpdate = onUpdate
         self.onError = onError
     }
 
@@ -112,8 +125,10 @@ actor SonioxSTT {
         self.webSocketTask = task
         self.isClosing = false
         self.hasFinished = false
-        self.stableText = ""
-        self.unstableText = ""
+        self.stableOriginal = ""
+        self.unstableOriginal = ""
+        self.stableTranslation = ""
+        self.unstableTranslation = ""
         self.currentSpeaker = nil
 
         task.resume()
@@ -121,7 +136,7 @@ actor SonioxSTT {
         isReceiving = true
         Task { await self.receiveLoop() }
 
-        // 설정 메시지 전송
+        // 설정 메시지 전송 (번역 포함)
         let config = SonioxConfigMessage(
             apiKey: apiKey,
             model: Self.model,
@@ -132,11 +147,15 @@ actor SonioxSTT {
             maxEndpointDelayMs: Self.maxEndpointDelayMs,
             enableSpeakerDiarization: true,
             languageHints: ["en"],
+            translation: SonioxTranslationConfig(
+                type: "one_way",
+                targetLanguage: "ko"
+            ),
             clientReferenceID: UUID().uuidString
         )
 
         try await sendEncodable(config)
-        print("[SonioxSTT] 연결 완료 (model: \(Self.model), endpoint: \(Self.maxEndpointDelayMs)ms, diarization: on)")
+        print("[SonioxSTT] 연결 완료 (model: \(Self.model), translation: en→ko, diarization: on)")
     }
 
     // MARK: - 오디오 전송
@@ -154,15 +173,11 @@ actor SonioxSTT {
     func stop() async {
         isClosing = true
 
-        // Silence padding 전송 (500ms)
         if webSocketTask != nil {
             let silenceData = Self.makeSilenceChunk(milliseconds: 500)
             try? await sendAudioData(silenceData)
-
-            // End-of-audio 신호 전송
             try? await webSocketTask?.send(.string(""))
 
-            // finished 응답 대기 (최대 3초)
             do {
                 try await withThrowingTaskGroup(of: Void.self) { group in
                     group.addTask {
@@ -172,12 +187,11 @@ actor SonioxSTT {
                         try await Task.sleep(nanoseconds: 3_000_000_000)
                         throw SonioxError.sessionClosed
                     }
-                    // 먼저 완료되는 것만 취함
                     try await group.next()
                     group.cancelAll()
                 }
             } catch {
-                // 타임아웃이면 무시하고 진행
+                // 타임아웃 무시
             }
         }
 
@@ -228,13 +242,15 @@ actor SonioxSTT {
         }
 
         var isEndpoint = false
-        var latestUnstableText = ""
+        var latestUnstableOriginal = ""
+        var latestUnstableTranslation = ""
         var sawToken = false
         var latestSpeaker: String? = currentSpeaker
 
         for token in response.tokens ?? [] {
             sawToken = true
             let text = token.text
+            let status = token.translationStatus ?? "original"
 
             if let speaker = token.speaker {
                 latestSpeaker = speaker
@@ -246,33 +262,48 @@ actor SonioxSTT {
                     continue
                 }
                 if text == "<fin>" {
-                    // Manual finalization — 종료 시 사용
                     isEndpoint = true
                     continue
                 }
-                stableText += text
+
+                switch status {
+                case "translation":
+                    stableTranslation += text
+                default: // "original", "none"
+                    stableOriginal += text
+                }
             } else {
-                latestUnstableText += text
+                switch status {
+                case "translation":
+                    latestUnstableTranslation += text
+                default:
+                    latestUnstableOriginal += text
+                }
             }
         }
 
-        unstableText = latestUnstableText
+        unstableOriginal = latestUnstableOriginal
+        unstableTranslation = latestUnstableTranslation
         currentSpeaker = latestSpeaker
 
         if sawToken || isEndpoint {
-            let update = SonioxTokenUpdate(
-                stableText: stableText,
-                unstableText: unstableText,
+            let update = SonioxUpdate(
+                stableText: stableOriginal,
+                unstableText: unstableOriginal,
+                stableTranslation: stableTranslation,
+                unstableTranslation: unstableTranslation,
                 speaker: currentSpeaker,
                 isEndpoint: isEndpoint
             )
-            onTokenUpdate?(update)
+            onUpdate?(update)
         }
 
-        // Endpoint 이후 stableText 초기화 (새 문장 시작)
+        // Endpoint 이후 텍스트 초기화
         if isEndpoint {
-            stableText = ""
-            unstableText = ""
+            stableOriginal = ""
+            unstableOriginal = ""
+            stableTranslation = ""
+            unstableTranslation = ""
         }
 
         if response.finished == true {
@@ -321,6 +352,16 @@ actor SonioxSTT {
 
 // MARK: - Soniox Protocol Messages
 
+private struct SonioxTranslationConfig: Encodable {
+    let type: String
+    let targetLanguage: String
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case targetLanguage = "target_language"
+    }
+}
+
 private struct SonioxConfigMessage: Encodable {
     let apiKey: String
     let model: String
@@ -331,6 +372,7 @@ private struct SonioxConfigMessage: Encodable {
     let maxEndpointDelayMs: Int
     let enableSpeakerDiarization: Bool
     let languageHints: [String]?
+    let translation: SonioxTranslationConfig
     let clientReferenceID: String
 
     enum CodingKeys: String, CodingKey {
@@ -343,6 +385,7 @@ private struct SonioxConfigMessage: Encodable {
         case maxEndpointDelayMs = "max_endpoint_delay_ms"
         case enableSpeakerDiarization = "enable_speaker_diarization"
         case languageHints = "language_hints"
+        case translation
         case clientReferenceID = "client_reference_id"
     }
 }
@@ -379,10 +422,12 @@ private struct SonioxToken: Decodable {
     let text: String
     let isFinal: Bool
     let speaker: String?
+    let translationStatus: String?
 
     enum CodingKeys: String, CodingKey {
         case text
         case isFinal = "is_final"
         case speaker
+        case translationStatus = "translation_status"
     }
 }

@@ -71,6 +71,8 @@ struct TranslationView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    @State private var isAtBottom: Bool = true
+
     // MARK: - Translation List
 
     private var translationListView: some View {
@@ -86,15 +88,24 @@ struct TranslationView: View {
                         )
                         .id(entry.id)
                     }
+
+                    // 하단 앵커 — 가시 여부로 isAtBottom 추적
+                    Color.clear
+                        .frame(height: 1)
+                        .id("bottom_anchor")
+                        .onAppear { isAtBottom = true }
+                        .onDisappear { isAtBottom = false }
                 }
                 .padding(12)
             }
-            .onChange(of: appState.orchestrator.entries.count) { _ in
-                // 자동 스크롤
-                if let lastEntry = appState.orchestrator.entries.last {
-                    withAnimation {
-                        proxy.scrollTo(lastEntry.id, anchor: .bottom)
-                    }
+            .onChange(of: appState.orchestrator.lastAddedEntryID) { _ in
+                if isAtBottom, let lastEntry = appState.orchestrator.entries.last {
+                    withAnimation { proxy.scrollTo(lastEntry.id, anchor: .bottom) }
+                }
+            }
+            .onChange(of: appState.orchestrator.entries.last?.originalText) { _ in
+                if isAtBottom, let lastEntry = appState.orchestrator.entries.last {
+                    withAnimation { proxy.scrollTo(lastEntry.id, anchor: .bottom) }
                 }
             }
         }
@@ -144,14 +155,12 @@ struct TranslationEntryRow: View {
             Text(entry.originalText)
                 .font(.system(size: 12 * textScale))
                 .foregroundColor(.secondary)
-                .lineLimit(2)
 
             // 번역 텍스트
-            if let translation = entry.displayTranslation {
+            if let translation = entry.translatedText, !translation.isEmpty {
                 Text(translation)
-                    .font(.system(size: 15 * textScale, weight: translationFontWeight))
-                    .foregroundColor(translationColor)
-                    .opacity(translationOpacity)
+                    .font(.system(size: 15 * textScale, weight: .medium))
+                    .foregroundColor(entry.isFinalized ? .primary : .secondary)
             } else if !entry.originalText.isEmpty {
                 // 번역 대기 중 - 깜빡이는 상태
                 Text("번역 중...")
@@ -169,7 +178,7 @@ struct TranslationEntryRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(backgroundColor)
+                .fill(entry.isFinalized ? Color.green.opacity(0.08) : Color.secondary.opacity(0.05))
         )
         .overlay(
             // 화자 색상 왼쪽 바
@@ -191,52 +200,6 @@ struct TranslationEntryRow: View {
     private func speakerColor(for speaker: String) -> Color {
         let index = (Int(speaker) ?? 1) - 1
         return Self.speakerColors[index % Self.speakerColors.count]
-    }
-
-    // MARK: - 번역 상태별 스타일
-
-    private var translationColor: Color {
-        switch entry.translationState {
-        case .pending:
-            return .secondary
-        case .quickCompleted:
-            return .secondary
-        case .contextCompleted:
-            return .primary
-        }
-    }
-
-    private var translationFontWeight: Font.Weight {
-        switch entry.translationState {
-        case .pending:
-            return .regular
-        case .quickCompleted:
-            return .medium
-        case .contextCompleted:
-            return .medium
-        }
-    }
-
-    private var translationOpacity: Double {
-        switch entry.translationState {
-        case .pending:
-            return 0.6
-        case .quickCompleted:
-            return 1.0
-        case .contextCompleted:
-            return 1.0
-        }
-    }
-
-    private var backgroundColor: Color {
-        switch entry.translationState {
-        case .pending:
-            return Color.secondary.opacity(0.05)
-        case .quickCompleted:
-            return Color.secondary.opacity(0.05)
-        case .contextCompleted:
-            return Color.green.opacity(0.08)
-        }
     }
 }
 

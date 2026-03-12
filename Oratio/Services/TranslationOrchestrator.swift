@@ -2,9 +2,8 @@ import Foundation
 import Combine
 import AVFoundation
 
-/// 이중 번역 오케스트레이터
-/// Soniox STT 결과를 받아 초벌/재벌 번역을 조율하고,
-/// 전체 파이프라인(AudioCapture -> Soniox STT -> Translation -> UI)을 관리한다.
+/// Soniox 실시간 STT + 번역 오케스트레이터
+/// 파이프라인: AudioCapture → Soniox STT (+ 실시간 번역) → UI
 @MainActor
 class TranslationOrchestrator: ObservableObject {
 
@@ -18,8 +17,6 @@ class TranslationOrchestrator: ObservableObject {
     // MARK: - 서비스 의존성
 
     private let audioCaptureService: AudioCaptureService
-    private let quickTranslation: QuickTranslationService
-    private let contextTranslation: ContextTranslationService
     private let settings: AppSettings
 
     // MARK: - Soniox STT
@@ -34,49 +31,22 @@ class TranslationOrchestrator: ObservableObject {
     /// 현재 엔트리의 화자
     private var currentSpeaker: String?
 
-    /// 초벌 번역 스로틀 타이머 태스크
-    private var quickTranslationTask: Task<Void, Never>?
-
-    /// 진행 중인 초벌 번역 API 태스크
-    private var quickTranslationRequestTask: Task<Void, Never>?
-
-    /// 초벌 번역 최신 요청 (스로틀 대기열: 최신 1개만 유지)
-    private var pendingQuickTranslation: (text: String, entryID: UUID)?
-
-    /// 맥락 유지: 최근 완성된 번역 쌍
-    private var translationContextHistory: [TranslationContext] = []
-
-    /// 맥락에 유지할 최대 문장 수
-    private let maxContextSize = 10
-
-    /// 초벌 번역 트리거를 위한 최소 단어 수
-    private let minimumWordCount = 3
-
-    /// 초벌 번역 스로틀 간격 (초)
-    private let quickTranslationThrottleInterval: TimeInterval = 0.7
-
-    /// 마지막 초벌 번역 디스패치 시각
-    private var lastQuickTranslationDispatchAt: Date = .distantPast
-
-    /// 마지막으로 초벌 번역을 트리거한 stableText 길이
-    private var lastQuickTranslationStableLength: Int = 0
-
     /// 사용자가 정지를 눌러 파이프라인을 내리는 중인지 여부
     private var isStopping: Bool = false
 
-    private var cancellables = Set<AnyCancellable>()
+    /// 현재 엔트리의 stableText에서 확인된 문장 수
+    private var currentSentenceCount: Int = 0
+
+    /// 최대 문장 수 (이 수에 도달하면 엔트리 분리)
+    private let maxSentencesPerEntry = 5
 
     // MARK: - 초기화
 
     init(
         audioCaptureService: AudioCaptureService,
-        quickTranslation: QuickTranslationService = QuickTranslationService(),
-        contextTranslation: ContextTranslationService = ContextTranslationService(),
         settings: AppSettings = AppSettings.shared
     ) {
         self.audioCaptureService = audioCaptureService
-        self.quickTranslation = quickTranslation
-        self.contextTranslation = contextTranslation
         self.settings = settings
     }
 
@@ -86,14 +56,13 @@ class TranslationOrchestrator: ObservableObject {
         guard !isRunning else { return }
         errorMessage = nil
         isStopping = false
-        lastQuickTranslationStableLength = 0
 
         let stt = SonioxSTT()
         self.soniox = stt
 
         // Soniox 콜백 설정
         await stt.setHandlers(
-            onTokenUpdate: { [weak self] update in
+            onUpdate: { [weak self] update in
                 Task { @MainActor [weak self] in
                     self?.handleSonioxUpdate(update)
                 }
@@ -131,7 +100,7 @@ class TranslationOrchestrator: ObservableObject {
         }
 
         isRunning = true
-        print("[Oratio] ===== 파이프라인 시작 (STT: Soniox) =====")
+        print("[Oratio] ===== 파이프라인 시작 (Soniox STT + 실시간 번역) =====")
     }
 
     func stop() {
@@ -139,18 +108,12 @@ class TranslationOrchestrator: ObservableObject {
         isStopping = true
         isRunning = false
 
-        quickTranslationTask?.cancel()
-        quickTranslationTask = nil
-        quickTranslationRequestTask?.cancel()
-        quickTranslationRequestTask = nil
-        pendingQuickTranslation = nil
-
         audioCaptureService.onAudioPCMBuffer = nil
 
         // Soniox 비동기 종료
         let stt = soniox
         Task {
-            await stt?.setHandlers(onTokenUpdate: nil, onError: nil)
+            await stt?.setHandlers(onUpdate: nil, onError: nil)
             await stt?.stop()
         }
 
@@ -166,206 +129,88 @@ class TranslationOrchestrator: ObservableObject {
 
     func clearEntries() {
         entries.removeAll()
-        translationContextHistory.removeAll()
         currentPartialEntryID = nil
         currentSpeaker = nil
-        lastQuickTranslationStableLength = 0
+        currentSentenceCount = 0
     }
 
-    // MARK: - Soniox 토큰 업데이트 처리
+    // MARK: - Soniox 업데이트 처리
 
-    private func handleSonioxUpdate(_ update: SonioxTokenUpdate) {
+    private func handleSonioxUpdate(_ update: SonioxUpdate) {
         guard isRunning, !isStopping else { return }
 
-        let fullText = (update.stableText + update.unstableText)
+        let fullOriginal = (update.stableText + update.unstableText)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !fullText.isEmpty else { return }
+        let fullTranslation = (update.stableTranslation + update.unstableTranslation)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !fullOriginal.isEmpty else { return }
 
         // 화자 변경 감지 → 현재 엔트리 확정 후 새 엔트리 시작
         if let newSpeaker = update.speaker,
            let current = currentSpeaker,
            newSpeaker != current,
-           currentPartialEntryID != nil {
-            finalizeCurrentEntry(stableText: update.stableText)
+           let entryID = currentPartialEntryID {
+            finalizePartialEntry(id: entryID)
         }
 
         currentSpeaker = update.speaker
 
+        // 5문장 도달 체크 — stableText 기준으로 문장 수 카운트
+        let sentenceCount = countSentences(in: update.stableText)
+        if sentenceCount >= maxSentencesPerEntry,
+           let entryID = currentPartialEntryID,
+           let index = entries.firstIndex(where: { $0.id == entryID }) {
+            let stableOriginal = update.stableText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let stableTranslation = update.stableTranslation.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !stableOriginal.isEmpty {
+                entries[index].originalText = stableOriginal
+                entries[index].translatedText = stableTranslation.isEmpty ? nil : stableTranslation
+            }
+            entries[index].isFinalized = true
+            currentPartialEntryID = nil
+            currentSentenceCount = 0
+            print("[Oratio] 엔트리 분리 (\(sentenceCount)문장): \"\(stableOriginal.prefix(60))\"")
+            // unstable 부분은 다음 업데이트에서 새 엔트리로 생성됨
+            return
+        }
+        currentSentenceCount = sentenceCount
+
         // 현재 엔트리 업데이트 또는 생성
         if let existingID = currentPartialEntryID,
            let index = entries.firstIndex(where: { $0.id == existingID }) {
-            entries[index].originalText = fullText
+            entries[index].originalText = fullOriginal
+            entries[index].translatedText = fullTranslation.isEmpty ? nil : fullTranslation
             entries[index].speaker = update.speaker
         } else {
             let newEntry = TranslationEntry(
-                originalText: fullText,
+                originalText: fullOriginal,
+                translatedText: fullTranslation.isEmpty ? nil : fullTranslation,
                 speaker: update.speaker
             )
             entries.append(newEntry)
             currentPartialEntryID = newEntry.id
             lastAddedEntryID = newEntry.id
-            lastQuickTranslationStableLength = 0
-            print("[SonioxSTT] 새 엔트리 생성 (speaker: \(update.speaker ?? "-"))")
+            currentSentenceCount = 0
+            print("[Oratio] 새 엔트리 생성 (speaker: \(update.speaker ?? "-"))")
         }
 
-        // stableText가 갱신되었을 때만 초벌 번역 트리거
-        let stableWordCount = update.stableText.split(separator: " ").count
-        if stableWordCount >= minimumWordCount,
-           update.stableText.count > lastQuickTranslationStableLength {
-            lastQuickTranslationStableLength = update.stableText.count
-            triggerQuickTranslation(text: update.stableText)
-        }
-
-        // Endpoint 감지 → 엔트리 확정 + 재벌 번역
+        // Endpoint 감지 → 엔트리 확정
         if update.isEndpoint {
-            finalizeCurrentEntry(stableText: update.stableText)
-        }
-    }
-
-    /// 현재 진행 중인 엔트리를 확정하고 재벌 번역을 트리거한다.
-    private func finalizeCurrentEntry(stableText: String) {
-        guard let entryID = currentPartialEntryID,
-              let index = entries.firstIndex(where: { $0.id == entryID }) else { return }
-
-        let finalText = stableText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !finalText.isEmpty else {
-            currentPartialEntryID = nil
-            lastQuickTranslationStableLength = 0
-            return
-        }
-
-        entries[index].originalText = finalText
-        entries[index].isFinalized = true
-        currentPartialEntryID = nil
-        lastQuickTranslationStableLength = 0
-
-        // 초벌 번역 (아직 없으면)
-        if entries[index].quickTranslation == nil {
-            triggerQuickTranslation(text: finalText, entryID: entryID)
-        }
-
-        // 재벌 번역 (이전 endpoint까지의 문장들을 맥락으로)
-        fireContextTranslation(text: finalText, entryID: entryID)
-
-        print("[SonioxSTT] 엔트리 확정 (endpoint): \"\(finalText.prefix(60))\"")
-    }
-
-    // MARK: - 초벌 번역 (Quick Translation)
-
-    private func triggerQuickTranslation(text: String, entryID: UUID? = nil) {
-        let targetID = entryID ?? currentPartialEntryID
-        guard let targetID = targetID else { return }
-
-        pendingQuickTranslation = (text: text, entryID: targetID)
-        scheduleQuickTranslationIfNeeded()
-    }
-
-    private func scheduleQuickTranslationIfNeeded() {
-        guard isRunning, !isStopping else { return }
-        guard quickTranslationRequestTask == nil else { return } // in-flight 동안은 최신 요청만 누적
-        guard pendingQuickTranslation != nil else { return }
-
-        let elapsed = Date().timeIntervalSince(lastQuickTranslationDispatchAt)
-        let remaining = quickTranslationThrottleInterval - elapsed
-
-        if remaining > 0 {
-            quickTranslationTask?.cancel()
-            quickTranslationTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    self?.quickTranslationTask = nil
-                    self?.scheduleQuickTranslationIfNeeded()
+            if let entryID = currentPartialEntryID {
+                if let index = entries.firstIndex(where: { $0.id == entryID }) {
+                    let stableOriginal = update.stableText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let stableTranslation = update.stableTranslation.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !stableOriginal.isEmpty {
+                        entries[index].originalText = stableOriginal
+                        entries[index].translatedText = stableTranslation.isEmpty ? nil : stableTranslation
+                    }
+                    entries[index].isFinalized = true
+                    print("[Oratio] 엔트리 확정 (endpoint): \"\(stableOriginal.prefix(60))\"")
                 }
+                currentPartialEntryID = nil
+                currentSentenceCount = 0
             }
-            return
-        }
-
-        guard let request = pendingQuickTranslation else { return }
-        pendingQuickTranslation = nil
-        lastQuickTranslationDispatchAt = Date()
-        quickTranslationTask?.cancel()
-        quickTranslationTask = nil
-
-        let requestText = request.text
-        let targetID = request.entryID
-
-        quickTranslationRequestTask = Task { [weak self] in
-            guard let self = self else { return }
-            defer {
-                self.quickTranslationRequestTask = nil
-                self.scheduleQuickTranslationIfNeeded()
-            }
-            guard self.isRunning, !self.isStopping else { return }
-
-            let startTime = CFAbsoluteTimeGetCurrent()
-            do {
-                let translation = try await self.quickTranslation.translate(text: requestText, context: nil)
-                let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-
-                guard self.isRunning, !self.isStopping,
-                      let index = self.entries.firstIndex(where: { $0.id == targetID }) else { return }
-
-                let latestText = self.entries[index].originalText
-                guard latestText == requestText || latestText.hasPrefix(requestText) else { return }
-                if let prevSource = self.entries[index].quickTranslationSourceText,
-                   prevSource.count > requestText.count {
-                    return
-                }
-
-                self.entries[index].quickTranslation = translation
-                self.entries[index].quickTranslationSourceText = requestText
-                print("[Oratio] 초벌 번역 완료 (\(String(format: "%.2f", elapsed))초): \"\(requestText.prefix(30))\" -> \"\(translation.prefix(30))\"")
-            } catch {
-                let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-                print("[Oratio] 초벌 번역 에러 (\(String(format: "%.2f", elapsed))초): \(error.localizedDescription)")
-            }
-        }
-    }
-
-    // MARK: - 재벌 번역 (Context Translation)
-
-    private func fireContextTranslation(text: String, entryID: UUID) {
-        let context = translationContextHistory
-        executeContextTranslation(text: text, entryID: entryID, context: context)
-    }
-
-    private func executeContextTranslation(text: String, entryID: UUID, context: [TranslationContext]) {
-        Task { [weak self] in
-            guard let self = self else { return }
-            guard self.isRunning, !self.isStopping else { return }
-            let startTime = CFAbsoluteTimeGetCurrent()
-            do {
-                let translation = try await self.contextTranslation.translate(
-                    text: text,
-                    context: context.isEmpty ? nil : context
-                )
-                let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-                if self.isRunning, !self.isStopping,
-                   let index = self.entries.firstIndex(where: { $0.id == entryID }) {
-                    self.entries[index].contextTranslation = translation
-                    print("[Oratio] 재벌 번역 완료 (\(String(format: "%.2f", elapsed))초): \"\(text.prefix(30))\" -> \"\(translation.prefix(30))\"")
-                    self.addToContextHistory(source: text, translation: translation)
-                }
-            } catch {
-                let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-                print("[Oratio] 재벌 번역 에러 (\(String(format: "%.2f", elapsed))초): \(error.localizedDescription)")
-                if self.isRunning, !self.isStopping,
-                   let index = self.entries.firstIndex(where: { $0.id == entryID }),
-                   self.entries[index].quickTranslation == nil {
-                    self.entries[index].quickTranslation = "[번역 실패]"
-                }
-            }
-        }
-    }
-
-    // MARK: - 맥락 관리
-
-    private func addToContextHistory(source: String, translation: String) {
-        let context = TranslationContext(source: source, translation: translation)
-        translationContextHistory.append(context)
-        if translationContextHistory.count > maxContextSize {
-            translationContextHistory.removeFirst(translationContextHistory.count - maxContextSize)
         }
     }
 
@@ -390,6 +235,23 @@ class TranslationOrchestrator: ObservableObject {
 
     // MARK: - 유틸리티
 
+    /// stableText 내 문장 수 카운트 (마침표/물음표/느낌표 + 공백 기준)
+    private func countSentences(in text: String) -> Int {
+        var count = 0
+        let chars = Array(text)
+        for i in 0..<chars.count {
+            if ".?!".contains(chars[i]) {
+                let nextIdx = i + 1
+                if nextIdx < chars.count && chars[nextIdx] == " " {
+                    count += 1
+                } else if nextIdx == chars.count {
+                    count += 1 // 마지막 문자가 구두점
+                }
+            }
+        }
+        return count
+    }
+
     private func finalizePartialEntry(id: UUID) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[index].isFinalized = true
@@ -397,15 +259,10 @@ class TranslationOrchestrator: ObservableObject {
     }
 
     private func cleanup() {
-        quickTranslationTask?.cancel()
-        quickTranslationTask = nil
-        quickTranslationRequestTask?.cancel()
-        quickTranslationRequestTask = nil
-        pendingQuickTranslation = nil
         soniox = nil
         audioCaptureService.onAudioPCMBuffer = nil
         currentPartialEntryID = nil
         currentSpeaker = nil
-        lastQuickTranslationStableLength = 0
+        currentSentenceCount = 0
     }
 }
