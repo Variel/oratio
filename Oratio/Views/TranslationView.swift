@@ -77,9 +77,14 @@ struct TranslationView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(appState.orchestrator.entries) { entry in
-                        TranslationEntryRow(entry: entry, textScale: textScale)
-                            .id(entry.id)
+                    ForEach(Array(appState.orchestrator.entries.enumerated()), id: \.element.id) { index, entry in
+                        let showSpeakerLabel = shouldShowSpeakerLabel(at: index)
+                        TranslationEntryRow(
+                            entry: entry,
+                            textScale: textScale,
+                            showSpeakerLabel: showSpeakerLabel
+                        )
+                        .id(entry.id)
                     }
                 }
                 .padding(12)
@@ -94,6 +99,14 @@ struct TranslationView: View {
             }
         }
     }
+
+    /// 같은 화자의 연속 엔트리에서는 라벨 생략 (첫 등장 시만 표시)
+    private func shouldShowSpeakerLabel(at index: Int) -> Bool {
+        let entries = appState.orchestrator.entries
+        guard let speaker = entries[index].speaker else { return false }
+        if index == 0 { return true }
+        return entries[index - 1].speaker != speaker
+    }
 }
 
 // MARK: - Translation Entry Row
@@ -101,12 +114,32 @@ struct TranslationView: View {
 struct TranslationEntryRow: View {
     let entry: TranslationEntry
     let textScale: CGFloat
+    let showSpeakerLabel: Bool
 
     /// 깜빡이는 애니메이션을 위한 상태
     @State private var isPulsing: Bool = false
 
+    /// 화자별 색상
+    private static let speakerColors: [Color] = [
+        .blue, .purple, .orange, .teal, .pink,
+        .indigo, .mint, .brown, .cyan, .red
+    ]
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+            // 화자 라벨 (첫 등장 시만)
+            if showSpeakerLabel, let speaker = entry.speaker {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(speakerColor(for: speaker))
+                        .frame(width: 8, height: 8)
+                    Text("Speaker \(speaker)")
+                        .font(.system(size: 10 * textScale, weight: .semibold))
+                        .foregroundColor(speakerColor(for: speaker))
+                }
+                .padding(.bottom, 2)
+            }
+
             // 원문 (영어) - 작은 폰트, 회색
             Text(entry.originalText)
                 .font(.system(size: 12 * textScale))
@@ -138,6 +171,26 @@ struct TranslationEntryRow: View {
             RoundedRectangle(cornerRadius: 6)
                 .fill(backgroundColor)
         )
+        .overlay(
+            // 화자 색상 왼쪽 바
+            entry.speaker != nil
+                ? RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.clear)
+                    .overlay(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(speakerColor(for: entry.speaker ?? "1"))
+                            .frame(width: 3)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                : nil
+        )
+    }
+
+    // MARK: - 화자 색상
+
+    private func speakerColor(for speaker: String) -> Color {
+        let index = (Int(speaker) ?? 1) - 1
+        return Self.speakerColors[index % Self.speakerColors.count]
     }
 
     // MARK: - 번역 상태별 스타일

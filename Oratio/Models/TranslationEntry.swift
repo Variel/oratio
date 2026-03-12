@@ -10,6 +10,7 @@ struct TranslationEntry: Identifiable {
     var contextTranslation: String?   // 재벌 번역 (gemini-3-pro-preview)
     var timestamp: Date               // 생성 시간
     var isFinalized: Bool             // 문장 완성 여부
+    var speaker: String?              // 화자 ID (Soniox diarization: "1", "2", ...)
 
     init(
         id: UUID = UUID(),
@@ -18,7 +19,8 @@ struct TranslationEntry: Identifiable {
         quickTranslationSourceText: String? = nil,
         contextTranslation: String? = nil,
         timestamp: Date = Date(),
-        isFinalized: Bool = false
+        isFinalized: Bool = false,
+        speaker: String? = nil
     ) {
         self.id = id
         self.originalText = originalText
@@ -27,6 +29,7 @@ struct TranslationEntry: Identifiable {
         self.contextTranslation = contextTranslation
         self.timestamp = timestamp
         self.isFinalized = isFinalized
+        self.speaker = speaker
     }
 
     /// 현재 표시할 번역 텍스트 (재벌 번역 우선)

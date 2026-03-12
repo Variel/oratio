@@ -1,9 +1,10 @@
 import Foundation
 import Combine
+import AVFoundation
 
 /// 이중 번역 오케스트레이터
-/// STT 결과를 받아 초벌/재벌 번역을 조율하고,
-/// 전체 파이프라인(AudioCapture -> STT -> Translation -> UI)을 관리한다.
+/// Soniox STT 결과를 받아 초벌/재벌 번역을 조율하고,
+/// 전체 파이프라인(AudioCapture -> Soniox STT -> Translation -> UI)을 관리한다.
 @MainActor
 class TranslationOrchestrator: ObservableObject {
 
@@ -21,14 +22,17 @@ class TranslationOrchestrator: ObservableObject {
     private let contextTranslation: ContextTranslationService
     private let settings: AppSettings
 
-    // MARK: - STT 프로바이더
+    // MARK: - Soniox STT
 
-    private var sttProvider: STTProvider?
+    private var soniox: SonioxSTT?
 
     // MARK: - 상태 관리
 
     /// 현재 진행 중인 부분 결과 엔트리의 ID
     private var currentPartialEntryID: UUID?
+
+    /// 현재 엔트리의 화자
+    private var currentSpeaker: String?
 
     /// 초벌 번역 스로틀 타이머 태스크
     private var quickTranslationTask: Task<Void, Never>?
@@ -48,32 +52,17 @@ class TranslationOrchestrator: ObservableObject {
     /// 초벌 번역 트리거를 위한 최소 단어 수
     private let minimumWordCount = 3
 
-    /// 강제 분리하는 최대 단어 수
-    private let sentenceSplitMaxWordCount = 20
-
-    /// 부분 결과 안정화 타이머 (침묵 감지용)
-    private var partialResultStabilizationTask: Task<Void, Never>?
-
-    /// 침묵 타임아웃 (초)
-    private let silenceTimeout: TimeInterval = 2.0
-
     /// 초벌 번역 스로틀 간격 (초)
     private let quickTranslationThrottleInterval: TimeInterval = 0.7
 
     /// 마지막 초벌 번역 디스패치 시각
     private var lastQuickTranslationDispatchAt: Date = .distantPast
 
-    /// STT 누적 텍스트 중 이미 finalize된 부분의 길이
-    /// Apple Speech용 — 다른 STT는 세션 누적이 아니므로 사용하지 않음
-    private var processedTextLength: Int = 0
+    /// 마지막으로 초벌 번역을 트리거한 stableText 길이
+    private var lastQuickTranslationStableLength: Int = 0
 
     /// 사용자가 정지를 눌러 파이프라인을 내리는 중인지 여부
     private var isStopping: Bool = false
-
-    /// Apple Speech, Google Cloud STT는 세션 내 누적 텍스트를 보냄
-    private var isCumulativeProvider: Bool {
-        settings.selectedSTTProvider == .apple || settings.selectedSTTProvider == .googleCloud
-    }
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -96,13 +85,33 @@ class TranslationOrchestrator: ObservableObject {
     func start() async {
         guard !isRunning else { return }
         errorMessage = nil
-        processedTextLength = 0
         isStopping = false
+        lastQuickTranslationStableLength = 0
 
-        let provider = createSTTProvider()
-        self.sttProvider = provider
-        setupSTTCallbacks(provider: provider)
-        setupAudioToSTTPipeline(provider: provider)
+        let stt = SonioxSTT()
+        self.soniox = stt
+
+        // Soniox 콜백 설정
+        await stt.setHandlers(
+            onTokenUpdate: { [weak self] update in
+                Task { @MainActor [weak self] in
+                    self?.handleSonioxUpdate(update)
+                }
+            },
+            onError: { [weak self] error in
+                Task { @MainActor [weak self] in
+                    self?.handleSTTError(error)
+                }
+            }
+        )
+
+        // 오디오 캡처 → Soniox 파이프라인 연결
+        audioCaptureService.onAudioPCMBuffer = { [weak stt] buffer in
+            guard let data = buffer.int16Data() else { return }
+            Task {
+                try? await stt?.sendAudioData(data)
+            }
+        }
 
         do {
             try await audioCaptureService.startCapture()
@@ -113,16 +122,16 @@ class TranslationOrchestrator: ObservableObject {
         }
 
         do {
-            try await provider.startRecognition()
+            try await stt.connect(apiKey: settings.sonioxApiKey)
         } catch {
-            errorMessage = "음성 인식 시작 실패: \(error.localizedDescription)"
+            errorMessage = "Soniox 연결 실패: \(error.localizedDescription)"
             audioCaptureService.stopCapture()
             cleanup()
             return
         }
 
         isRunning = true
-        print("[Oratio] ===== 파이프라인 시작 (STT: \(provider.name)) =====")
+        print("[Oratio] ===== 파이프라인 시작 (STT: Soniox) =====")
     }
 
     func stop() {
@@ -136,13 +145,15 @@ class TranslationOrchestrator: ObservableObject {
         quickTranslationRequestTask = nil
         pendingQuickTranslation = nil
 
-        // stop() 시 STT 구현체가 synthetic final을 올려도 무시되도록 먼저 콜백 해제
-        sttProvider?.onPartialResult = nil
-        sttProvider?.onFinalResult = nil
-        sttProvider?.onError = nil
         audioCaptureService.onAudioPCMBuffer = nil
 
-        sttProvider?.stopRecognition()
+        // Soniox 비동기 종료
+        let stt = soniox
+        Task {
+            await stt?.setHandlers(onTokenUpdate: nil, onError: nil)
+            await stt?.stop()
+        }
+
         audioCaptureService.stopCapture()
 
         if let partialID = currentPartialEntryID {
@@ -157,195 +168,86 @@ class TranslationOrchestrator: ObservableObject {
         entries.removeAll()
         translationContextHistory.removeAll()
         currentPartialEntryID = nil
-        processedTextLength = 0
+        currentSpeaker = nil
+        lastQuickTranslationStableLength = 0
     }
 
-    // MARK: - STT 프로바이더 생성
+    // MARK: - Soniox 토큰 업데이트 처리
 
-    private func createSTTProvider() -> STTProvider {
-        switch settings.selectedSTTProvider {
-        case .apple:
-            return AppleSpeechSTT()
-        case .whisper:
-            return WhisperSTT()
-        case .googleCloud:
-            return GoogleCloudSTT()
-        }
-    }
-
-    // MARK: - 콜백 설정
-
-    private func setupSTTCallbacks(provider: STTProvider) {
-        provider.onPartialResult = { [weak self] text in
-            Task { @MainActor [weak self] in
-                self?.handlePartialResult(text)
-            }
-        }
-
-        provider.onFinalResult = { [weak self] text in
-            Task { @MainActor [weak self] in
-                self?.handleFinalResult(text)
-            }
-        }
-
-        provider.onError = { [weak self] error in
-            Task { @MainActor [weak self] in
-                self?.handleSTTError(error)
-            }
-        }
-    }
-
-    private func setupAudioToSTTPipeline(provider: STTProvider) {
-        audioCaptureService.onAudioPCMBuffer = { [weak provider] buffer in
-            provider?.feedAudioBuffer(buffer)
-        }
-    }
-
-    // MARK: - 누적 텍스트 처리
-
-    /// 누적 텍스트에서 현재 진행 중인 부분만 추출한다.
-    /// Apple Speech: 세션 전체 누적 → processedTextLength로 잘라냄
-    /// Google Cloud 등: 누적이 아니므로 전체 반환
-    private func extractCurrentText(from fullText: String) -> String {
-        guard isCumulativeProvider,
-              processedTextLength > 0,
-              processedTextLength <= fullText.count else {
-            return fullText
-        }
-        return String(fullText.dropFirst(processedTextLength))
-            .trimmingCharacters(in: .whitespaces)
-    }
-
-    // MARK: - STT 부분 결과 처리
-
-    func handlePartialResult(_ text: String) {
+    private func handleSonioxUpdate(_ update: SonioxTokenUpdate) {
         guard isRunning, !isStopping else { return }
 
-        let fullText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fullText = (update.stableText + update.unstableText)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !fullText.isEmpty else { return }
 
-        let currentText = extractCurrentText(from: fullText)
-        guard !currentText.isEmpty else { return }
+        // 화자 변경 감지 → 현재 엔트리 확정 후 새 엔트리 시작
+        if let newSpeaker = update.speaker,
+           let current = currentSpeaker,
+           newSpeaker != current,
+           currentPartialEntryID != nil {
+            finalizeCurrentEntry(stableText: update.stableText)
+        }
 
-        // 현재 엔트리 업데이트
+        currentSpeaker = update.speaker
+
+        // 현재 엔트리 업데이트 또는 생성
         if let existingID = currentPartialEntryID,
            let index = entries.firstIndex(where: { $0.id == existingID }) {
-            entries[index].originalText = currentText
-            print("[Oratio] 엔트리 업데이트 (\(currentText.count)자): \"\(currentText.prefix(60))\"")
+            entries[index].originalText = fullText
+            entries[index].speaker = update.speaker
         } else {
-            let newEntry = TranslationEntry(originalText: currentText)
+            let newEntry = TranslationEntry(
+                originalText: fullText,
+                speaker: update.speaker
+            )
             entries.append(newEntry)
             currentPartialEntryID = newEntry.id
             lastAddedEntryID = newEntry.id
-            print("[Oratio] 새 엔트리 생성 (\(currentText.count)자): \"\(currentText.prefix(60))\"")
+            lastQuickTranslationStableLength = 0
+            print("[SonioxSTT] 새 엔트리 생성 (speaker: \(update.speaker ?? "-"))")
         }
 
-        let wordCount = currentText.split(separator: " ").count
+        // stableText가 갱신되었을 때만 초벌 번역 트리거
+        let stableWordCount = update.stableText.split(separator: " ").count
+        if stableWordCount >= minimumWordCount,
+           update.stableText.count > lastQuickTranslationStableLength {
+            lastQuickTranslationStableLength = update.stableText.count
+            triggerQuickTranslation(text: update.stableText)
+        }
 
-        // 최대 단어 수 초과 시 강제 분리 (세션 누적 STT만 — Google Cloud 등은 자체 utterance 경계 사용)
-        if isCumulativeProvider, wordCount >= sentenceSplitMaxWordCount, let entryID = currentPartialEntryID {
-            forceFinalize(text: currentText, entryID: entryID, fullTextLength: fullText.count)
+        // Endpoint 감지 → 엔트리 확정 + 재벌 번역
+        if update.isEndpoint {
+            finalizeCurrentEntry(stableText: update.stableText)
+        }
+    }
+
+    /// 현재 진행 중인 엔트리를 확정하고 재벌 번역을 트리거한다.
+    private func finalizeCurrentEntry(stableText: String) {
+        guard let entryID = currentPartialEntryID,
+              let index = entries.firstIndex(where: { $0.id == entryID }) else { return }
+
+        let finalText = stableText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !finalText.isEmpty else {
+            currentPartialEntryID = nil
+            lastQuickTranslationStableLength = 0
             return
         }
 
-        // 번역 트리거
-        if wordCount >= minimumWordCount {
-            triggerQuickTranslation(text: currentText)
-        }
-
-        // 침묵 감지
-        resetSilenceTimer(fullText: fullText)
-    }
-
-    /// 최대 단어 수 초과 시 엔트리를 강제 분리한다.
-    private func forceFinalize(text: String, entryID: UUID, fullTextLength: Int) {
-        guard let index = entries.firstIndex(where: { $0.id == entryID }) else { return }
-        entries[index].originalText = text
+        entries[index].originalText = finalText
         entries[index].isFinalized = true
         currentPartialEntryID = nil
-        if isCumulativeProvider {
-            processedTextLength = fullTextLength
+        lastQuickTranslationStableLength = 0
+
+        // 초벌 번역 (아직 없으면)
+        if entries[index].quickTranslation == nil {
+            triggerQuickTranslation(text: finalText, entryID: entryID)
         }
 
-        // 번역 트리거 (즉시)
-        triggerQuickTranslation(text: text, entryID: entryID)
-        fireContextTranslation(text: text, entryID: entryID)
+        // 재벌 번역 (이전 endpoint까지의 문장들을 맥락으로)
+        fireContextTranslation(text: finalText, entryID: entryID)
 
-        print("[Oratio] 강제 분리 (\(text.split(separator: " ").count)단어): \"\(text.prefix(50))...\"")
-    }
-
-    private func resetSilenceTimer(fullText: String) {
-        partialResultStabilizationTask?.cancel()
-        partialResultStabilizationTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(self?.silenceTimeout ?? 2.0) * 1_000_000_000)
-            guard !Task.isCancelled else { return }
-            guard let self = self else { return }
-            guard let entryID = self.currentPartialEntryID else { return }
-
-            print("[Oratio] 침묵 감지 (\(self.silenceTimeout)초)")
-
-            if self.isCumulativeProvider {
-                // Apple Speech: 세션 전체 누적이므로 handleFinalResult로 processedTextLength 갱신
-                self.handleFinalResult(fullText, isSessionEnd: false)
-            } else {
-                // Google Cloud 등: utterance 단위 누적이므로
-                // 엔트리만 finalize하고 currentPartialEntryID는 유지한다.
-                // Google이 같은 utterance에서 추가 interim을 보내면 같은 엔트리에 누적되고,
-                // isFinal이 오면 onFinalResult 콜백에서 정상 finalize된다.
-                let currentText = self.extractCurrentText(from: fullText)
-                guard !currentText.isEmpty else { return }
-
-                // 침묵 구간에서는 현재 문장이 안정된 것으로 보고 재벌 번역을 트리거한다.
-                self.fireContextTranslation(text: currentText, entryID: entryID)
-
-                if let index = self.entries.firstIndex(where: { $0.id == entryID }),
-                   self.entries[index].quickTranslation == nil {
-                    self.triggerQuickTranslation(text: currentText, entryID: entryID)
-                }
-            }
-        }
-    }
-
-    // MARK: - STT 최종 결과 처리
-
-    func handleFinalResult(_ text: String, isSessionEnd: Bool = false) {
-        guard isRunning, !isStopping else { return }
-
-        let fullText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !fullText.isEmpty else { return }
-
-        let currentText = extractCurrentText(from: fullText)
-        guard !currentText.isEmpty else { return }
-
-        // 침묵 타이머 취소 (final 도착 시 더 이상 불필요)
-        partialResultStabilizationTask?.cancel()
-        partialResultStabilizationTask = nil
-
-        quickTranslationTask?.cancel()
-        quickTranslationTask = nil
-
-        let entryID: UUID
-
-        if let existingID = currentPartialEntryID,
-           let index = entries.firstIndex(where: { $0.id == existingID }) {
-            entries[index].originalText = currentText
-            entries[index].isFinalized = true
-            entryID = existingID
-        } else {
-            let newEntry = TranslationEntry(originalText: currentText, isFinalized: true)
-            entries.append(newEntry)
-            entryID = newEntry.id
-            lastAddedEntryID = newEntry.id
-        }
-
-        currentPartialEntryID = nil
-        if isCumulativeProvider {
-            processedTextLength = isSessionEnd ? 0 : fullText.count
-        }
-
-        // finalized → 즉시 재벌 번역
-        fireContextTranslation(text: currentText, entryID: entryID)
-        triggerQuickTranslation(text: currentText, entryID: entryID)
+        print("[SonioxSTT] 엔트리 확정 (endpoint): \"\(finalText.prefix(60))\"")
     }
 
     // MARK: - 초벌 번역 (Quick Translation)
@@ -405,11 +307,10 @@ class TranslationOrchestrator: ObservableObject {
                       let index = self.entries.firstIndex(where: { $0.id == targetID }) else { return }
 
                 let latestText = self.entries[index].originalText
-                // 최신 텍스트가 더 길어졌다면(prefix) 이전 결과도 우선 표시해 체감 지연을 줄인다.
                 guard latestText == requestText || latestText.hasPrefix(requestText) else { return }
                 if let prevSource = self.entries[index].quickTranslationSourceText,
                    prevSource.count > requestText.count {
-                    return // 더 최신 source 기준 번역이 이미 있으면 역행 업데이트 방지
+                    return
                 }
 
                 self.entries[index].quickTranslation = translation
@@ -424,13 +325,11 @@ class TranslationOrchestrator: ObservableObject {
 
     // MARK: - 재벌 번역 (Context Translation)
 
-    /// finalized 엔트리용: 즉시 실행, 취소 불가
     private func fireContextTranslation(text: String, entryID: UUID) {
         let context = translationContextHistory
         executeContextTranslation(text: text, entryID: entryID, context: context)
     }
 
-    /// 재벌 번역 API 호출 (별도 Task)
     private func executeContextTranslation(text: String, entryID: UUID, context: [TranslationContext]) {
         Task { [weak self] in
             guard let self = self else { return }
@@ -475,17 +374,11 @@ class TranslationOrchestrator: ObservableObject {
     private func handleSTTError(_ error: Error) {
         guard isRunning, !isStopping else { return }
 
-        print("[Oratio] STT 에러: \(error.localizedDescription)")
-        if let sttError = error as? STTError {
-            switch sttError {
+        print("[Oratio] Soniox 에러: \(error.localizedDescription)")
+        if let sonioxError = error as? SonioxError {
+            switch sonioxError {
             case .apiKeyMissing:
-                errorMessage = "API 키가 설정되지 않았습니다."
-                stop()
-            case .permissionDenied:
-                errorMessage = "음성 인식 권한이 거부되었습니다."
-                stop()
-            case .recognitionNotAvailable:
-                errorMessage = "음성 인식을 사용할 수 없습니다."
+                errorMessage = "Soniox API 키가 설정되지 않았습니다."
                 stop()
             default:
                 errorMessage = error.localizedDescription
@@ -509,14 +402,10 @@ class TranslationOrchestrator: ObservableObject {
         quickTranslationRequestTask?.cancel()
         quickTranslationRequestTask = nil
         pendingQuickTranslation = nil
-        partialResultStabilizationTask?.cancel()
-        partialResultStabilizationTask = nil
-        sttProvider?.onPartialResult = nil
-        sttProvider?.onFinalResult = nil
-        sttProvider?.onError = nil
-        sttProvider = nil
+        soniox = nil
         audioCaptureService.onAudioPCMBuffer = nil
         currentPartialEntryID = nil
-        processedTextLength = 0
+        currentSpeaker = nil
+        lastQuickTranslationStableLength = 0
     }
 }
