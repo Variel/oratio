@@ -46,7 +46,7 @@ actor SonioxSTT {
     // MARK: - 상수
 
     static let websocketURL = "wss://stt-rt.soniox.com/transcribe-websocket"
-    static let model = "stt-rt-preview"
+    static let model = "stt-rt-v4"
     static let audioFormat = "pcm_s16le"
     static let sampleRate = 16_000
     static let numChannels = 1
