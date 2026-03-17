@@ -40,6 +40,12 @@ class TranslationOrchestrator: ObservableObject {
     /// 최대 문장 수 (이 수에 도달하면 엔트리 분리)
     private let maxSentencesPerEntry = 5
 
+    /// 이전 엔트리들에서 이미 소비(확정)된 stableText 길이
+    /// Soniox의 stableText는 endpoint까지 계속 누적되므로,
+    /// 5문장 분리 시 이미 확정된 부분을 건너뛰기 위해 사용
+    private var consumedStableOriginalCount: Int = 0
+    private var consumedStableTranslationCount: Int = 0
+
     // MARK: - 초기화
 
     init(
@@ -132,6 +138,8 @@ class TranslationOrchestrator: ObservableObject {
         currentPartialEntryID = nil
         currentSpeaker = nil
         currentSentenceCount = 0
+        consumedStableOriginalCount = 0
+        consumedStableTranslationCount = 0
     }
 
     // MARK: - Soniox 업데이트 처리
@@ -139,9 +147,14 @@ class TranslationOrchestrator: ObservableObject {
     private func handleSonioxUpdate(_ update: SonioxUpdate) {
         guard isRunning, !isStopping else { return }
 
-        let fullOriginal = (update.stableText + update.unstableText)
+        // Soniox stableText는 endpoint까지 계속 누적됨.
+        // 5문장 분리로 이미 확정된 부분을 제외한 "현재 엔트리" 텍스트만 추출
+        let currentStableOriginal = String(update.stableText.dropFirst(consumedStableOriginalCount))
+        let currentStableTranslation = String(update.stableTranslation.dropFirst(consumedStableTranslationCount))
+
+        let fullOriginal = (currentStableOriginal + update.unstableText)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let fullTranslation = (update.stableTranslation + update.unstableTranslation)
+        let fullTranslation = (currentStableTranslation + update.unstableTranslation)
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !fullOriginal.isEmpty else { return }
@@ -152,25 +165,30 @@ class TranslationOrchestrator: ObservableObject {
            newSpeaker != current,
            let entryID = currentPartialEntryID {
             finalizePartialEntry(id: entryID)
+            consumedStableOriginalCount = update.stableText.count
+            consumedStableTranslationCount = update.stableTranslation.count
         }
 
         currentSpeaker = update.speaker
 
-        // 5문장 도달 체크 — stableText 기준으로 문장 수 카운트
-        let sentenceCount = countSentences(in: update.stableText)
+        // 5문장 도달 체크 — 현재 엔트리의 stableText 기준
+        let sentenceCount = countSentences(in: currentStableOriginal)
         if sentenceCount >= maxSentencesPerEntry,
            let entryID = currentPartialEntryID,
            let index = entries.firstIndex(where: { $0.id == entryID }) {
-            let stableOriginal = update.stableText.trimmingCharacters(in: .whitespacesAndNewlines)
-            let stableTranslation = update.stableTranslation.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !stableOriginal.isEmpty {
-                entries[index].originalText = stableOriginal
-                entries[index].translatedText = stableTranslation.isEmpty ? nil : stableTranslation
+            let trimmedOriginal = currentStableOriginal.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedTranslation = currentStableTranslation.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedOriginal.isEmpty {
+                entries[index].originalText = trimmedOriginal
+                entries[index].translatedText = trimmedTranslation.isEmpty ? nil : trimmedTranslation
             }
             entries[index].isFinalized = true
             currentPartialEntryID = nil
             currentSentenceCount = 0
-            print("[Oratio] 엔트리 분리 (\(sentenceCount)문장): \"\(stableOriginal.prefix(60))\"")
+            // 소비된 위치 업데이트 — 다음 엔트리는 여기서부터 시작
+            consumedStableOriginalCount = update.stableText.count
+            consumedStableTranslationCount = update.stableTranslation.count
+            print("[Oratio] 엔트리 분리 (\(sentenceCount)문장): \"\(trimmedOriginal.prefix(60))\"")
             // unstable 부분은 다음 업데이트에서 새 엔트리로 생성됨
             return
         }
@@ -199,18 +217,21 @@ class TranslationOrchestrator: ObservableObject {
         if update.isEndpoint {
             if let entryID = currentPartialEntryID {
                 if let index = entries.firstIndex(where: { $0.id == entryID }) {
-                    let stableOriginal = update.stableText.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let stableTranslation = update.stableTranslation.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !stableOriginal.isEmpty {
-                        entries[index].originalText = stableOriginal
-                        entries[index].translatedText = stableTranslation.isEmpty ? nil : stableTranslation
+                    let trimmedOriginal = currentStableOriginal.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let trimmedTranslation = currentStableTranslation.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmedOriginal.isEmpty {
+                        entries[index].originalText = trimmedOriginal
+                        entries[index].translatedText = trimmedTranslation.isEmpty ? nil : trimmedTranslation
                     }
                     entries[index].isFinalized = true
-                    print("[Oratio] 엔트리 확정 (endpoint): \"\(stableOriginal.prefix(60))\"")
+                    print("[Oratio] 엔트리 확정 (endpoint): \"\(trimmedOriginal.prefix(60))\"")
                 }
                 currentPartialEntryID = nil
                 currentSentenceCount = 0
             }
+            // Endpoint 후 Soniox가 stableText를 리셋하므로 consumed 카운터도 리셋
+            consumedStableOriginalCount = 0
+            consumedStableTranslationCount = 0
         }
     }
 
@@ -264,5 +285,7 @@ class TranslationOrchestrator: ObservableObject {
         currentPartialEntryID = nil
         currentSpeaker = nil
         currentSentenceCount = 0
+        consumedStableOriginalCount = 0
+        consumedStableTranslationCount = 0
     }
 }
