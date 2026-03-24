@@ -25,7 +25,7 @@ struct ControlBar: View {
             }
 
             HStack(spacing: 12) {
-                // 시작/정지 버튼
+                // 시스템 오디오 시작/정지 버튼
                 Button(action: toggleTranslation) {
                     HStack(spacing: 6) {
                         Image(systemName: appState.orchestrator.isRunning ? "stop.fill" : "play.fill")
@@ -37,19 +37,35 @@ struct ControlBar: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
 
-                // 상태 인디케이터 + 오디오 레벨 미터
-                if appState.orchestrator.isRunning {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 6, height: 6)
-                        Text("캡처 중")
-                            .font(.system(size: 10 * textScale))
-                            .foregroundColor(.secondary)
+                // 마이크 토글 버튼
+                Button(action: toggleMic) {
+                    HStack(spacing: 4) {
+                        Image(systemName: appState.orchestrator.isMicRunning ? "mic.fill" : "mic.slash")
+                            .foregroundColor(appState.orchestrator.isMicRunning ? .cyan : .secondary)
+                        Text(appState.orchestrator.isMicRunning ? "마이크 끄기" : "마이크")
+                            .font(.system(size: 13 * textScale, weight: .medium))
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
 
-                        // 오디오 레벨 미터
-                        AudioLevelMeter(level: appState.audioCaptureService.audioLevel)
-                            .frame(width: 40, height: 10)
+                // 상태 인디케이터 + 오디오 레벨 미터
+                if appState.orchestrator.isRunning || appState.orchestrator.isMicRunning {
+                    HStack(spacing: 6) {
+                        if appState.orchestrator.isRunning {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 6, height: 6)
+                            AudioLevelMeter(level: appState.audioCaptureService.audioLevel)
+                                .frame(width: 30, height: 10)
+                        }
+                        if appState.orchestrator.isMicRunning {
+                            Circle()
+                                .fill(Color.cyan)
+                                .frame(width: 6, height: 6)
+                            AudioLevelMeter(level: appState.orchestrator.micCaptureService.audioLevel, barColor: .cyan)
+                                .frame(width: 30, height: 10)
+                        }
                     }
                 }
 
@@ -71,6 +87,10 @@ struct ControlBar: View {
         appState.toggleTranslation()
     }
 
+    private func toggleMic() {
+        appState.toggleMic()
+    }
+
     private func openSettingsWindow() {
         DispatchQueue.main.async {
             if let appDelegate = NSApp.delegate as? AppDelegate {
@@ -86,6 +106,7 @@ struct ControlBar: View {
 /// 오디오 레벨을 시각적으로 표시하는 미터
 struct AudioLevelMeter: View {
     let level: Float
+    var barColor: Color? = nil
 
     var body: some View {
         GeometryReader { geometry in
@@ -104,6 +125,7 @@ struct AudioLevelMeter: View {
     }
 
     private var levelColor: Color {
+        if let barColor { return barColor }
         if level > 0.8 {
             return .red
         } else if level > 0.5 {

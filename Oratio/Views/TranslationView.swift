@@ -136,10 +136,25 @@ struct TranslationEntryRow: View {
         .indigo, .mint, .brown, .cyan, .red
     ]
 
+    /// 마이크 소스 색상
+    private static let micColor: Color = .cyan
+
+    private var isMic: Bool { entry.source == .microphone }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // 화자 라벨 (첫 등장 시만)
-            if showSpeakerLabel, let speaker = entry.speaker {
+            // 소스 라벨
+            if isMic {
+                HStack(spacing: 4) {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 9 * textScale))
+                        .foregroundColor(Self.micColor)
+                    Text("나 (한→영)")
+                        .font(.system(size: 10 * textScale, weight: .semibold))
+                        .foregroundColor(Self.micColor)
+                }
+                .padding(.bottom, 2)
+            } else if showSpeakerLabel, let speaker = entry.speaker {
                 HStack(spacing: 4) {
                     Circle()
                         .fill(speakerColor(for: speaker))
@@ -151,18 +166,19 @@ struct TranslationEntryRow: View {
                 .padding(.bottom, 2)
             }
 
-            // 원문 (영어) - 작은 폰트, 회색
+            // 원문 - 작은 폰트
             Text(entry.originalText)
                 .font(.system(size: 12 * textScale))
-                .foregroundColor(.secondary)
+                .foregroundColor(isMic ? Self.micColor.opacity(0.7) : .secondary)
 
             // 번역 텍스트
             if let translation = entry.translatedText, !translation.isEmpty {
                 Text(translation)
                     .font(.system(size: 15 * textScale, weight: .medium))
-                    .foregroundColor(entry.isFinalized ? .primary : .secondary)
+                    .foregroundColor(isMic
+                        ? (entry.isFinalized ? Self.micColor : Self.micColor.opacity(0.6))
+                        : (entry.isFinalized ? .primary : .secondary))
             } else if !entry.originalText.isEmpty {
-                // 번역 대기 중 - 깜빡이는 상태
                 Text("번역 중...")
                     .font(.system(size: 13 * textScale))
                     .foregroundColor(.secondary)
@@ -175,27 +191,36 @@ struct TranslationEntryRow: View {
             }
         }
         .padding(8)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: isMic ? .trailing : .leading)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(entry.isFinalized ? Color.green.opacity(0.08) : Color.secondary.opacity(0.05))
+                .fill(isMic
+                    ? Self.micColor.opacity(entry.isFinalized ? 0.10 : 0.05)
+                    : (entry.isFinalized ? Color.green.opacity(0.08) : Color.secondary.opacity(0.05)))
         )
         .overlay(
-            // 화자 색상 왼쪽 바
-            entry.speaker != nil
-                ? RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.clear)
-                    .overlay(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(speakerColor(for: entry.speaker ?? "1"))
-                            .frame(width: 3)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                : nil
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.clear)
+                .overlay(alignment: isMic ? .trailing : .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(leftBarColor)
+                        .frame(width: 3)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 6))
         )
     }
 
-    // MARK: - 화자 색상
+    // MARK: - 색상
+
+    private var leftBarColor: Color {
+        if isMic {
+            return Self.micColor
+        }
+        if let speaker = entry.speaker {
+            return speakerColor(for: speaker)
+        }
+        return .green
+    }
 
     private func speakerColor(for speaker: String) -> Color {
         let index = (Int(speaker) ?? 1) - 1

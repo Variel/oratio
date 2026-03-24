@@ -26,5 +26,7 @@
 	<false/>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Oratio가 화상회의의 시스템 오디오를 캡처하여 실시간 번역을 제공하기 위해 화면 녹화 권한이 필요합니다.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Oratio가 마이크 음성을 캡처하여 실시간 번역을 제공하기 위해 마이크 접근 권한이 필요합니다.</string>
 </dict>
 </plist>

@@ -111,7 +111,11 @@ actor SonioxSTT {
 
     // MARK: - 연결
 
-    func connect(apiKey: String) async throws {
+    func connect(
+        apiKey: String,
+        languageHints: [String] = ["en"],
+        targetLanguage: String = "ko"
+    ) async throws {
         guard !apiKey.isEmpty else {
             throw SonioxError.apiKeyMissing
         }
@@ -136,6 +140,8 @@ actor SonioxSTT {
         isReceiving = true
         Task { await self.receiveLoop() }
 
+        let sourceLanguage = languageHints.first ?? "en"
+
         // 설정 메시지 전송 (번역 포함)
         let config = SonioxConfigMessage(
             apiKey: apiKey,
@@ -146,16 +152,16 @@ actor SonioxSTT {
             enableEndpointDetection: true,
             maxEndpointDelayMs: Self.maxEndpointDelayMs,
             enableSpeakerDiarization: true,
-            languageHints: ["en"],
+            languageHints: languageHints,
             translation: SonioxTranslationConfig(
                 type: "one_way",
-                targetLanguage: "ko"
+                targetLanguage: targetLanguage
             ),
             clientReferenceID: UUID().uuidString
         )
 
         try await sendEncodable(config)
-        print("[SonioxSTT] 연결 완료 (model: \(Self.model), translation: en→ko, diarization: on)")
+        print("[SonioxSTT] 연결 완료 (model: \(Self.model), translation: \(sourceLanguage)→\(targetLanguage), diarization: on)")
     }
 
     // MARK: - 오디오 전송

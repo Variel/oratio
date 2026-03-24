@@ -4,6 +4,7 @@ import AVFoundation
 
 /// Soniox 실시간 STT + 번역 오케스트레이터
 /// 파이프라인: AudioCapture → Soniox STT (+ 실시간 번역) → UI
+/// 양방향: 시스템 오디오 (en→ko) + 마이크 (ko→en)
 @MainActor
 class TranslationOrchestrator: ObservableObject {
 
@@ -11,19 +12,25 @@ class TranslationOrchestrator: ObservableObject {
 
     @Published var entries: [TranslationEntry] = []
     @Published var isRunning: Bool = false
+    @Published var isMicRunning: Bool = false
     @Published var errorMessage: String?
     @Published var lastAddedEntryID: UUID?
 
     // MARK: - 서비스 의존성
 
     private let audioCaptureService: AudioCaptureService
+    let micCaptureService: MicCaptureService
     private let settings: AppSettings
 
-    // MARK: - Soniox STT
+    // MARK: - Soniox STT (시스템 오디오용)
 
     private var soniox: SonioxSTT?
 
-    // MARK: - 상태 관리
+    // MARK: - Soniox STT (마이크용)
+
+    private var micSoniox: SonioxSTT?
+
+    // MARK: - 상태 관리 (시스템 오디오)
 
     /// 현재 진행 중인 부분 결과 엔트리의 ID
     private var currentPartialEntryID: UUID?
@@ -46,13 +53,21 @@ class TranslationOrchestrator: ObservableObject {
     private var consumedStableOriginalCount: Int = 0
     private var consumedStableTranslationCount: Int = 0
 
+    // MARK: - 상태 관리 (마이크)
+
+    private var micPartialEntryID: UUID?
+    private var micSentenceCount: Int = 0
+    private var isMicStopping: Bool = false
+
     // MARK: - 초기화
 
     init(
         audioCaptureService: AudioCaptureService,
+        micCaptureService: MicCaptureService = MicCaptureService(),
         settings: AppSettings = AppSettings.shared
     ) {
         self.audioCaptureService = audioCaptureService
+        self.micCaptureService = micCaptureService
         self.settings = settings
     }
 
@@ -92,7 +107,7 @@ class TranslationOrchestrator: ObservableObject {
             try await audioCaptureService.startCapture()
         } catch {
             errorMessage = "오디오 캡처 시작 실패: \(error.localizedDescription)"
-            cleanup()
+            cleanupSystemAudio()
             return
         }
 
@@ -101,7 +116,7 @@ class TranslationOrchestrator: ObservableObject {
         } catch {
             errorMessage = "Soniox 연결 실패: \(error.localizedDescription)"
             audioCaptureService.stopCapture()
-            cleanup()
+            cleanupSystemAudio()
             return
         }
 
@@ -129,8 +144,85 @@ class TranslationOrchestrator: ObservableObject {
             finalizePartialEntry(id: partialID)
         }
 
-        cleanup()
+        cleanupSystemAudio()
         isStopping = false
+    }
+
+    // MARK: - 마이크 파이프라인 제어
+
+    func startMic() async {
+        guard !isMicRunning else { return }
+        isMicStopping = false
+
+        let stt = SonioxSTT()
+        self.micSoniox = stt
+
+        await stt.setHandlers(
+            onUpdate: { [weak self] update in
+                Task { @MainActor [weak self] in
+                    self?.handleMicSonioxUpdate(update)
+                }
+            },
+            onError: { [weak self] error in
+                Task { @MainActor [weak self] in
+                    self?.handleMicSTTError(error)
+                }
+            }
+        )
+
+        micCaptureService.onAudioPCMBuffer = { [weak stt] buffer in
+            guard let data = buffer.int16Data() else { return }
+            Task {
+                try? await stt?.sendAudioData(data)
+            }
+        }
+
+        do {
+            try micCaptureService.startCapture()
+        } catch {
+            errorMessage = "마이크 캡처 시작 실패: \(error.localizedDescription)"
+            cleanupMic()
+            return
+        }
+
+        do {
+            try await stt.connect(
+                apiKey: settings.sonioxApiKey,
+                languageHints: ["ko"],
+                targetLanguage: "en"
+            )
+        } catch {
+            errorMessage = "마이크 Soniox 연결 실패: \(error.localizedDescription)"
+            micCaptureService.stopCapture()
+            cleanupMic()
+            return
+        }
+
+        isMicRunning = true
+        print("[Oratio] ===== 마이크 파이프라인 시작 (Soniox STT + 실시간 번역 ko→en) =====")
+    }
+
+    func stopMic() {
+        guard isMicRunning else { return }
+        isMicStopping = true
+        isMicRunning = false
+
+        micCaptureService.onAudioPCMBuffer = nil
+
+        let stt = micSoniox
+        Task {
+            await stt?.setHandlers(onUpdate: nil, onError: nil)
+            await stt?.stop()
+        }
+
+        micCaptureService.stopCapture()
+
+        if let partialID = micPartialEntryID {
+            finalizePartialEntry(id: partialID)
+        }
+
+        cleanupMic()
+        isMicStopping = false
     }
 
     func clearEntries() {
@@ -140,6 +232,8 @@ class TranslationOrchestrator: ObservableObject {
         currentSentenceCount = 0
         consumedStableOriginalCount = 0
         consumedStableTranslationCount = 0
+        micPartialEntryID = nil
+        micSentenceCount = 0
     }
 
     // MARK: - Soniox 업데이트 처리
@@ -235,6 +329,85 @@ class TranslationOrchestrator: ObservableObject {
         }
     }
 
+    // MARK: - 마이크 업데이트 처리
+
+    private func handleMicSonioxUpdate(_ update: SonioxUpdate) {
+        guard isMicRunning, !isMicStopping else { return }
+
+        let fullOriginal = (update.stableText + update.unstableText)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let fullTranslation = (update.stableTranslation + update.unstableTranslation)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !fullOriginal.isEmpty else { return }
+
+        // 에코 필터: 마이크는 한국어 입력용이므로 원문에 한글이 없으면
+        // 스피커에서 나온 영어 에코가 인식된 것으로 판단하여 무시한다.
+        if !containsKorean(fullOriginal) {
+            // 에코로 만들어진 진행 중 엔트리가 있으면 제거
+            if let entryID = micPartialEntryID,
+               let index = entries.firstIndex(where: { $0.id == entryID }) {
+                entries.remove(at: index)
+                micPartialEntryID = nil
+                micSentenceCount = 0
+            }
+            return
+        }
+
+        // 5문장 도달 체크
+        let sentenceCount = countSentences(in: update.stableText)
+        if sentenceCount >= maxSentencesPerEntry,
+           let entryID = micPartialEntryID,
+           let index = entries.firstIndex(where: { $0.id == entryID }) {
+            let stableOriginal = update.stableText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let stableTranslation = update.stableTranslation.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !stableOriginal.isEmpty {
+                entries[index].originalText = stableOriginal
+                entries[index].translatedText = stableTranslation.isEmpty ? nil : stableTranslation
+            }
+            entries[index].isFinalized = true
+            micPartialEntryID = nil
+            micSentenceCount = 0
+            return
+        }
+        micSentenceCount = sentenceCount
+
+        // 현재 엔트리 업데이트 또는 생성
+        if let existingID = micPartialEntryID,
+           let index = entries.firstIndex(where: { $0.id == existingID }) {
+            entries[index].originalText = fullOriginal
+            entries[index].translatedText = fullTranslation.isEmpty ? nil : fullTranslation
+        } else {
+            let newEntry = TranslationEntry(
+                originalText: fullOriginal,
+                translatedText: fullTranslation.isEmpty ? nil : fullTranslation,
+                source: .microphone
+            )
+            entries.append(newEntry)
+            micPartialEntryID = newEntry.id
+            lastAddedEntryID = newEntry.id
+            micSentenceCount = 0
+            print("[Oratio] 마이크 새 엔트리 생성")
+        }
+
+        // Endpoint 감지 → 엔트리 확정
+        if update.isEndpoint {
+            if let entryID = micPartialEntryID {
+                if let index = entries.firstIndex(where: { $0.id == entryID }) {
+                    let stableOriginal = update.stableText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let stableTranslation = update.stableTranslation.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !stableOriginal.isEmpty {
+                        entries[index].originalText = stableOriginal
+                        entries[index].translatedText = stableTranslation.isEmpty ? nil : stableTranslation
+                    }
+                    entries[index].isFinalized = true
+                }
+                micPartialEntryID = nil
+                micSentenceCount = 0
+            }
+        }
+    }
+
     // MARK: - 에러 처리
 
     private func handleSTTError(_ error: Error) {
@@ -254,7 +427,33 @@ class TranslationOrchestrator: ObservableObject {
         }
     }
 
+    private func handleMicSTTError(_ error: Error) {
+        guard isMicRunning, !isMicStopping else { return }
+
+        print("[Oratio] 마이크 Soniox 에러: \(error.localizedDescription)")
+        if let sonioxError = error as? SonioxError {
+            switch sonioxError {
+            case .apiKeyMissing:
+                errorMessage = "Soniox API 키가 설정되지 않았습니다."
+                stopMic()
+            default:
+                errorMessage = error.localizedDescription
+            }
+        } else {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     // MARK: - 유틸리티
+
+    /// 텍스트에 한글(Hangul)이 포함되어 있는지 확인
+    private func containsKorean(_ text: String) -> Bool {
+        return text.unicodeScalars.contains { scalar in
+            (0xAC00...0xD7A3).contains(scalar.value) ||  // 완성형 한글
+            (0x1100...0x11FF).contains(scalar.value) ||  // 한글 자모
+            (0x3130...0x318F).contains(scalar.value)     // 호환용 한글 자모
+        }
+    }
 
     /// stableText 내 문장 수 카운트 (마침표/물음표/느낌표 + 공백 기준)
     private func countSentences(in text: String) -> Int {
@@ -279,7 +478,7 @@ class TranslationOrchestrator: ObservableObject {
         currentPartialEntryID = nil
     }
 
-    private func cleanup() {
+    private func cleanupSystemAudio() {
         soniox = nil
         audioCaptureService.onAudioPCMBuffer = nil
         currentPartialEntryID = nil
@@ -287,5 +486,12 @@ class TranslationOrchestrator: ObservableObject {
         currentSentenceCount = 0
         consumedStableOriginalCount = 0
         consumedStableTranslationCount = 0
+    }
+
+    private func cleanupMic() {
+        micSoniox = nil
+        micCaptureService.onAudioPCMBuffer = nil
+        micPartialEntryID = nil
+        micSentenceCount = 0
     }
 }

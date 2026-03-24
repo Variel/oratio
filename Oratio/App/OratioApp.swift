@@ -101,6 +101,17 @@ class AppState: ObservableObject {
         }
     }
 
+    /// 마이크 시작/정지 토글
+    func toggleMic() {
+        if orchestrator.isMicRunning {
+            orchestrator.stopMic()
+        } else {
+            Task { @MainActor in
+                await orchestrator.startMic()
+            }
+        }
+    }
+
     func increaseTextScale() {
         updateTextScale(by: 0.1)
     }
