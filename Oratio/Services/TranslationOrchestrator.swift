@@ -59,6 +59,8 @@ class TranslationOrchestrator: ObservableObject {
     private var micSentenceCount: Int = 0
     private var isMicStopping: Bool = false
 
+    // (에코 캔슬링은 MicCaptureService의 Voice Processing IO가 담당)
+
     // MARK: - 초기화
 
     init(
@@ -341,19 +343,6 @@ class TranslationOrchestrator: ObservableObject {
 
         guard !fullOriginal.isEmpty else { return }
 
-        // 에코 필터: 마이크는 한국어 입력용이므로 원문에 한글이 없으면
-        // 스피커에서 나온 영어 에코가 인식된 것으로 판단하여 무시한다.
-        if !containsKorean(fullOriginal) {
-            // 에코로 만들어진 진행 중 엔트리가 있으면 제거
-            if let entryID = micPartialEntryID,
-               let index = entries.firstIndex(where: { $0.id == entryID }) {
-                entries.remove(at: index)
-                micPartialEntryID = nil
-                micSentenceCount = 0
-            }
-            return
-        }
-
         // 5문장 도달 체크
         let sentenceCount = countSentences(in: update.stableText)
         if sentenceCount >= maxSentencesPerEntry,
@@ -387,7 +376,6 @@ class TranslationOrchestrator: ObservableObject {
             micPartialEntryID = newEntry.id
             lastAddedEntryID = newEntry.id
             micSentenceCount = 0
-            print("[Oratio] 마이크 새 엔트리 생성")
         }
 
         // Endpoint 감지 → 엔트리 확정
@@ -445,15 +433,6 @@ class TranslationOrchestrator: ObservableObject {
     }
 
     // MARK: - 유틸리티
-
-    /// 텍스트에 한글(Hangul)이 포함되어 있는지 확인
-    private func containsKorean(_ text: String) -> Bool {
-        return text.unicodeScalars.contains { scalar in
-            (0xAC00...0xD7A3).contains(scalar.value) ||  // 완성형 한글
-            (0x1100...0x11FF).contains(scalar.value) ||  // 한글 자모
-            (0x3130...0x318F).contains(scalar.value)     // 호환용 한글 자모
-        }
-    }
 
     /// stableText 내 문장 수 카운트 (마침표/물음표/느낌표 + 공백 기준)
     private func countSentences(in text: String) -> Int {

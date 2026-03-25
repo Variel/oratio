@@ -1,6 +1,9 @@
 import Foundation
 import AVFoundation
 import Combine
+import os.log
+
+private let micLog = Logger(subsystem: "ing.unlimit.oratio", category: "MicCapture")
 
 /// 마이크 오디오 캡처 서비스
 /// AVAudioEngine을 이용하여 마이크 입력을 캡처한다.
@@ -41,7 +44,15 @@ class MicCaptureService: NSObject, ObservableObject {
         guard !isCapturing else { return }
 
         let inputNode = audioEngine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
+
+        // Voice Processing 활성화 — AEC(에코 캔슬링) + 노이즈 억제
+        // VP는 내부 집합 디바이스를 생성하여 3채널(마이크+참조)로 변경됨
+        try inputNode.setVoiceProcessingEnabled(true)
+
+        let vpFormat = inputNode.outputFormat(forBus: 0)
+        micLog.warning("VP 활성화 — deviceID: \(inputNode.auAudioUnit.deviceID), sampleRate: \(vpFormat.sampleRate), ch: \(vpFormat.channelCount)")
+
+        let inputFormat = vpFormat
 
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
             print("[MicCaptureService] 유효하지 않은 입력 포맷: \(inputFormat)")
@@ -50,21 +61,42 @@ class MicCaptureService: NSObject, ObservableObject {
 
         guard let targetFormat = targetFormat else { return }
 
-        // 리샘플링 컨버터 생성
         audioConverter = AVAudioConverter(from: inputFormat, to: targetFormat)
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+        micLog.warning("tap 설치 — format: sampleRate=\(inputFormat.sampleRate), ch=\(inputFormat.channelCount)")
+
+        // VP가 3채널을 줄 수 있으므로 nil format으로 받아서 채널 0만 추출
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
             guard let self else { return }
 
-            guard let resampled = self.resample(buffer) else { return }
+            // 멀티채널이면 채널 0(에코 제거된 마이크)만 모노 버퍼로 추출
+            let monoBuffer: AVAudioPCMBuffer
+            if buffer.format.channelCount > 1 {
+                guard let extracted = self.extractChannel0(from: buffer) else { return }
+                monoBuffer = extracted
+            } else {
+                monoBuffer = buffer
+            }
 
-            // 오디오 레벨 업데이트
-            let level = self.calculateAudioLevel(from: resampled)
+            // 리샘플링 (48kHz → 16kHz)
+            let output: AVAudioPCMBuffer
+            if monoBuffer.format.sampleRate == Self.targetSampleRate {
+                output = monoBuffer
+            } else {
+                // 컨버터가 없거나 포맷이 바뀌었으면 재생성
+                if self.audioConverter == nil || self.audioConverter?.inputFormat != monoBuffer.format {
+                    self.audioConverter = AVAudioConverter(from: monoBuffer.format, to: targetFormat)
+                }
+                guard let resampled = self.resample(monoBuffer) else { return }
+                output = resampled
+            }
+
+            let level = self.calculateAudioLevel(from: output)
             DispatchQueue.main.async {
                 self.audioLevel = level
             }
 
-            self.onAudioPCMBuffer?(resampled)
+            self.onAudioPCMBuffer?(output)
         }
 
         try audioEngine.start()
@@ -83,6 +115,7 @@ class MicCaptureService: NSObject, ObservableObject {
 
         audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.stop()
+        try? audioEngine.inputNode.setVoiceProcessingEnabled(false)
 
         DispatchQueue.main.async {
             self.isCapturing = false
@@ -90,6 +123,33 @@ class MicCaptureService: NSObject, ObservableObject {
         }
 
         print("[MicCaptureService] 마이크 캡처 정지")
+    }
+
+    // MARK: - 채널 추출
+
+    /// 멀티채널 버퍼에서 채널 0만 모노 버퍼로 추출
+    private func extractChannel0(from buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let channelData = buffer.floatChannelData else { return nil }
+        let frameCount = buffer.frameLength
+
+        guard let monoFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: buffer.format.sampleRate,
+            channels: 1,
+            interleaved: false
+        ) else { return nil }
+
+        guard let monoBuffer = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: frameCount) else {
+            return nil
+        }
+        monoBuffer.frameLength = frameCount
+
+        guard let monoData = monoBuffer.floatChannelData else { return nil }
+
+        // 채널 0 복사
+        memcpy(monoData[0], channelData[0], Int(frameCount) * MemoryLayout<Float>.size)
+
+        return monoBuffer
     }
 
     // MARK: - 리샘플링

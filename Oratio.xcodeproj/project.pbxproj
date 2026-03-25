@@ -22,6 +22,7 @@
 		EE63E4CB4921514C7EA0F0A9 /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DC22BA8A5AD24A0237A58BD /* FloatingPanel.swift */; };
 		F05ADE715A8E579A0D40F5E3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BD56B49C02F47CBCAB7AC192 /* Assets.xcassets */; };
 		D7A1B2C3E4F56789ABCD0001 /* MicCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A1B2C3E4F56789ABCD0002 /* MicCaptureService.swift */; };
+		D7A1B2C3E4F56789ABCD0003 /* EchoCanceller.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A1B2C3E4F56789ABCD0004 /* EchoCanceller.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,6 +43,7 @@
 		EFF55B080F418BF6B46B97B6 /* SonioxSTT.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxSTT.swift; sourceTree = "<group>"; };
 		F9463788A7546435AFDD6968 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		D7A1B2C3E4F56789ABCD0002 /* MicCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicCaptureService.swift; sourceTree = "<group>"; };
+		D7A1B2C3E4F56789ABCD0004 /* EchoCanceller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoCanceller.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -134,6 +136,7 @@
 			isa = PBXGroup;
 			children = (
 				956333BA13E854037247B866 /* AudioCaptureService.swift */,
+				D7A1B2C3E4F56789ABCD0004 /* EchoCanceller.swift */,
 				D7A1B2C3E4F56789ABCD0002 /* MicCaptureService.swift */,
 				D35E75E5DD1046C0EA869CCD /* TranslationOrchestrator.swift */,
 				C5E6BEB94E29F05CA3612A2C /* STT */,
@@ -234,6 +237,7 @@
 				8EB849ABE48D76EFCE424A43 /* SonioxSTT.swift in Sources */,
 				0B7D15E3A9AE593F919C615D /* TranslationEntry.swift in Sources */,
 				99BE23871A284C379A56D3C2 /* TranslationOrchestrator.swift in Sources */,
+				D7A1B2C3E4F56789ABCD0003 /* EchoCanceller.swift in Sources */,
 				D7A1B2C3E4F56789ABCD0001 /* MicCaptureService.swift in Sources */,
 				543324C012EB66F895F7CCD9 /* TranslationView.swift in Sources */,
 			);
