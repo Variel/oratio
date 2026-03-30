@@ -4,6 +4,7 @@ import SwiftUI
 /// 플로팅 패널 내에 표시되는 스크롤 가능한 번역 리스트
 struct TranslationView: View {
     @EnvironmentObject var appState: AppState
+    @ObservedObject private var settings = AppSettings.shared
     private var textScale: CGFloat { appState.textScale }
 
     var body: some View {
@@ -44,9 +45,16 @@ struct TranslationView: View {
             Text("Oratio")
                 .font(.system(size: 17 * textScale, weight: .semibold))
             Spacer()
-            Text(appState.orchestrator.isRunning ? "캡처 중" : "대기 중")
-                .font(.system(size: 12 * textScale))
-                .foregroundColor(.secondary)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(appState.orchestrator.isRunning || appState.orchestrator.isMicRunning ? "캡처 중" : "대기 중")
+                    .font(.system(size: 12 * textScale))
+                    .foregroundColor(.secondary)
+                if settings.isMicrophoneMixExperimentEnabled {
+                    Text("raw mix · mic \(Int(settings.mixMicrophoneDelayMs.rounded()))ms · \(Int(settings.mixMicrophoneGainDb.rounded()))dB")
+                        .font(.system(size: 10 * textScale, weight: .medium))
+                        .foregroundColor(.orange)
+                }
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

@@ -10,28 +10,31 @@
 		0B7D15E3A9AE593F919C615D /* TranslationEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91230A433007E2D58D8DD4BE /* TranslationEntry.swift */; };
 		23288674962884221B96E6FF /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB312E3BAD295937BCCCC41 /* AppSettings.swift */; };
 		35FF5FBA6FBB8A34F0BEDE28 /* ScreenCaptureKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 01FFA309FD0EB42393021FEA /* ScreenCaptureKit.framework */; };
+		38D658F801DC93C984F30251 /* MicrophoneCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2AFA03A97C59E7E1CE3A3F7 /* MicrophoneCaptureService.swift */; };
 		4490D1F83ED8CF019A97ACB1 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BEC365048BC3184CE9C4A05A /* AVFoundation.framework */; };
 		543324C012EB66F895F7CCD9 /* TranslationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B9480CC88F61925247CF0FC /* TranslationView.swift */; };
 		595024C5529CFFE2C0141DB4 /* OratioApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97EAF9114E00C702C6BD91BC /* OratioApp.swift */; };
 		6F1F97B00D187CECE0F0EEB2 /* AVAudioPCMBuffer+PCM16.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B3466B1089984E72CAEB9F4 /* AVAudioPCMBuffer+PCM16.swift */; };
+		8ACDC36EFE8B1EBAE97D575B /* MicCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E8070284161F2C68916F634 /* MicCaptureService.swift */; };
 		8EB849ABE48D76EFCE424A43 /* SonioxSTT.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFF55B080F418BF6B46B97B6 /* SonioxSTT.swift */; };
 		99BE23871A284C379A56D3C2 /* TranslationOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D35E75E5DD1046C0EA869CCD /* TranslationOrchestrator.swift */; };
 		A0BD78B27524488A84E28991 /* ControlBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A12AAFF1B8010D59EC7D007 /* ControlBar.swift */; };
 		A4EB667057A093BB5410DC3E /* AudioCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 956333BA13E854037247B866 /* AudioCaptureService.swift */; };
+		A56D74B94D6829CB23011FA2 /* AudioMixingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03360105E81FADE63B818E2C /* AudioMixingService.swift */; };
 		CDF51EEFAE80706956E891E5 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9463788A7546435AFDD6968 /* SettingsView.swift */; };
 		EE63E4CB4921514C7EA0F0A9 /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DC22BA8A5AD24A0237A58BD /* FloatingPanel.swift */; };
 		F05ADE715A8E579A0D40F5E3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BD56B49C02F47CBCAB7AC192 /* Assets.xcassets */; };
-		D7A1B2C3E4F56789ABCD0001 /* MicCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A1B2C3E4F56789ABCD0002 /* MicCaptureService.swift */; };
-		D7A1B2C3E4F56789ABCD0003 /* EchoCanceller.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A1B2C3E4F56789ABCD0004 /* EchoCanceller.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		01FFA309FD0EB42393021FEA /* ScreenCaptureKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ScreenCaptureKit.framework; path = System/Library/Frameworks/ScreenCaptureKit.framework; sourceTree = SDKROOT; };
+		03360105E81FADE63B818E2C /* AudioMixingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMixingService.swift; sourceTree = "<group>"; };
 		1A12AAFF1B8010D59EC7D007 /* ControlBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlBar.swift; sourceTree = "<group>"; };
 		3CB312E3BAD295937BCCCC41 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		3DC22BA8A5AD24A0237A58BD /* FloatingPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanel.swift; sourceTree = "<group>"; };
 		68478F920931373681D4945D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		76994C919595EB19ED1C4EA7 /* Oratio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Oratio.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7E8070284161F2C68916F634 /* MicCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicCaptureService.swift; sourceTree = "<group>"; };
 		8B3466B1089984E72CAEB9F4 /* AVAudioPCMBuffer+PCM16.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AVAudioPCMBuffer+PCM16.swift"; sourceTree = "<group>"; };
 		8B9480CC88F61925247CF0FC /* TranslationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationView.swift; sourceTree = "<group>"; };
 		91230A433007E2D58D8DD4BE /* TranslationEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationEntry.swift; sourceTree = "<group>"; };
@@ -40,10 +43,9 @@
 		BD56B49C02F47CBCAB7AC192 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		BEC365048BC3184CE9C4A05A /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		D35E75E5DD1046C0EA869CCD /* TranslationOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationOrchestrator.swift; sourceTree = "<group>"; };
+		E2AFA03A97C59E7E1CE3A3F7 /* MicrophoneCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicrophoneCaptureService.swift; sourceTree = "<group>"; };
 		EFF55B080F418BF6B46B97B6 /* SonioxSTT.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxSTT.swift; sourceTree = "<group>"; };
 		F9463788A7546435AFDD6968 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		D7A1B2C3E4F56789ABCD0002 /* MicCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicCaptureService.swift; sourceTree = "<group>"; };
-		D7A1B2C3E4F56789ABCD0004 /* EchoCanceller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoCanceller.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -136,8 +138,9 @@
 			isa = PBXGroup;
 			children = (
 				956333BA13E854037247B866 /* AudioCaptureService.swift */,
-				D7A1B2C3E4F56789ABCD0004 /* EchoCanceller.swift */,
-				D7A1B2C3E4F56789ABCD0002 /* MicCaptureService.swift */,
+				03360105E81FADE63B818E2C /* AudioMixingService.swift */,
+				7E8070284161F2C68916F634 /* MicCaptureService.swift */,
+				E2AFA03A97C59E7E1CE3A3F7 /* MicrophoneCaptureService.swift */,
 				D35E75E5DD1046C0EA869CCD /* TranslationOrchestrator.swift */,
 				C5E6BEB94E29F05CA3612A2C /* STT */,
 			);
@@ -193,7 +196,6 @@
 				};
 			};
 			buildConfigurationList = 9B3FB19B9941104D7E6F7AEC /* Build configuration list for PBXProject "Oratio" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -203,6 +205,7 @@
 			mainGroup = 0C91F4B05F9A600ABB8DC4B7;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
+			productRefGroup = 87B939483E79A8D3DA4E0732 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -230,15 +233,16 @@
 				6F1F97B00D187CECE0F0EEB2 /* AVAudioPCMBuffer+PCM16.swift in Sources */,
 				23288674962884221B96E6FF /* AppSettings.swift in Sources */,
 				A4EB667057A093BB5410DC3E /* AudioCaptureService.swift in Sources */,
+				A56D74B94D6829CB23011FA2 /* AudioMixingService.swift in Sources */,
 				A0BD78B27524488A84E28991 /* ControlBar.swift in Sources */,
 				EE63E4CB4921514C7EA0F0A9 /* FloatingPanel.swift in Sources */,
+				8ACDC36EFE8B1EBAE97D575B /* MicCaptureService.swift in Sources */,
+				38D658F801DC93C984F30251 /* MicrophoneCaptureService.swift in Sources */,
 				595024C5529CFFE2C0141DB4 /* OratioApp.swift in Sources */,
 				CDF51EEFAE80706956E891E5 /* SettingsView.swift in Sources */,
 				8EB849ABE48D76EFCE424A43 /* SonioxSTT.swift in Sources */,
 				0B7D15E3A9AE593F919C615D /* TranslationEntry.swift in Sources */,
 				99BE23871A284C379A56D3C2 /* TranslationOrchestrator.swift in Sources */,
-				D7A1B2C3E4F56789ABCD0003 /* EchoCanceller.swift in Sources */,
-				D7A1B2C3E4F56789ABCD0001 /* MicCaptureService.swift in Sources */,
 				543324C012EB66F895F7CCD9 /* TranslationView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -1,6 +1,6 @@
-import Foundation
-import Combine
 import AVFoundation
+import Combine
+import Foundation
 
 /// Soniox 실시간 STT + 번역 오케스트레이터
 /// 파이프라인: AudioCapture → Soniox STT (+ 실시간 번역) → UI
@@ -20,11 +20,13 @@ class TranslationOrchestrator: ObservableObject {
 
     private let audioCaptureService: AudioCaptureService
     let micCaptureService: MicCaptureService
+    private let rawMixMicrophoneCaptureService: MicrophoneCaptureService
     private let settings: AppSettings
 
     // MARK: - Soniox STT (시스템 오디오용)
 
     private var soniox: SonioxSTT?
+    private var audioMixingService: AudioMixingService?
 
     // MARK: - Soniox STT (마이크용)
 
@@ -32,24 +34,11 @@ class TranslationOrchestrator: ObservableObject {
 
     // MARK: - 상태 관리 (시스템 오디오)
 
-    /// 현재 진행 중인 부분 결과 엔트리의 ID
     private var currentPartialEntryID: UUID?
-
-    /// 현재 엔트리의 화자
     private var currentSpeaker: String?
-
-    /// 사용자가 정지를 눌러 파이프라인을 내리는 중인지 여부
     private var isStopping: Bool = false
-
-    /// 현재 엔트리의 stableText에서 확인된 문장 수
     private var currentSentenceCount: Int = 0
-
-    /// 최대 문장 수 (이 수에 도달하면 엔트리 분리)
     private let maxSentencesPerEntry = 5
-
-    /// 이전 엔트리들에서 이미 소비(확정)된 stableText 길이
-    /// Soniox의 stableText는 endpoint까지 계속 누적되므로,
-    /// 5문장 분리 시 이미 확정된 부분을 건너뛰기 위해 사용
     private var consumedStableOriginalCount: Int = 0
     private var consumedStableTranslationCount: Int = 0
 
@@ -59,21 +48,21 @@ class TranslationOrchestrator: ObservableObject {
     private var micSentenceCount: Int = 0
     private var isMicStopping: Bool = false
 
-    // (에코 캔슬링은 MicCaptureService의 Voice Processing IO가 담당)
-
     // MARK: - 초기화
 
     init(
         audioCaptureService: AudioCaptureService,
         micCaptureService: MicCaptureService = MicCaptureService(),
+        rawMixMicrophoneCaptureService: MicrophoneCaptureService = MicrophoneCaptureService(),
         settings: AppSettings = AppSettings.shared
     ) {
         self.audioCaptureService = audioCaptureService
         self.micCaptureService = micCaptureService
+        self.rawMixMicrophoneCaptureService = rawMixMicrophoneCaptureService
         self.settings = settings
     }
 
-    // MARK: - 파이프라인 제어
+    // MARK: - 시스템 오디오 파이프라인 제어
 
     func start() async {
         guard !isRunning else { return }
@@ -83,7 +72,6 @@ class TranslationOrchestrator: ObservableObject {
         let stt = SonioxSTT()
         self.soniox = stt
 
-        // Soniox 콜백 설정
         await stt.setHandlers(
             onUpdate: { [weak self] update in
                 Task { @MainActor [weak self] in
@@ -97,18 +85,22 @@ class TranslationOrchestrator: ObservableObject {
             }
         )
 
-        // 오디오 캡처 → Soniox 파이프라인 연결
-        audioCaptureService.onAudioPCMBuffer = { [weak stt] buffer in
-            guard let data = buffer.int16Data() else { return }
-            Task {
-                try? await stt?.sendAudioData(data)
-            }
+        let isMixExperimentEnabled = settings.isMicrophoneMixExperimentEnabled
+        if isMixExperimentEnabled, isMicRunning {
+            print("[Oratio] raw mix 실험 시작 전 기존 마이크 전용 파이프라인을 정리합니다.")
+            stopMic()
         }
+        configureAudioPipeline(for: stt, isMixExperimentEnabled: isMixExperimentEnabled)
 
         do {
             try await audioCaptureService.startCapture()
+            if isMixExperimentEnabled {
+                try await rawMixMicrophoneCaptureService.startCapture()
+            }
         } catch {
             errorMessage = "오디오 캡처 시작 실패: \(error.localizedDescription)"
+            rawMixMicrophoneCaptureService.stopCapture()
+            audioCaptureService.stopCapture()
             cleanupSystemAudio()
             return
         }
@@ -117,13 +109,18 @@ class TranslationOrchestrator: ObservableObject {
             try await stt.connect(apiKey: settings.sonioxApiKey)
         } catch {
             errorMessage = "Soniox 연결 실패: \(error.localizedDescription)"
+            rawMixMicrophoneCaptureService.stopCapture()
             audioCaptureService.stopCapture()
             cleanupSystemAudio()
             return
         }
 
         isRunning = true
-        print("[Oratio] ===== 파이프라인 시작 (Soniox STT + 실시간 번역) =====")
+        if isMixExperimentEnabled {
+            print("[Oratio] ===== 시스템 파이프라인 시작 (raw mix 실험) =====")
+        } else {
+            print("[Oratio] ===== 시스템 파이프라인 시작 (Soniox STT + 실시간 번역 en→ko) =====")
+        }
     }
 
     func stop() {
@@ -132,18 +129,20 @@ class TranslationOrchestrator: ObservableObject {
         isRunning = false
 
         audioCaptureService.onAudioPCMBuffer = nil
+        rawMixMicrophoneCaptureService.onAudioPCMBuffer = nil
 
-        // Soniox 비동기 종료
+        rawMixMicrophoneCaptureService.stopCapture()
+        audioCaptureService.stopCapture()
+        audioMixingService?.flush()
+
         let stt = soniox
         Task {
             await stt?.setHandlers(onUpdate: nil, onError: nil)
             await stt?.stop()
         }
 
-        audioCaptureService.stopCapture()
-
         if let partialID = currentPartialEntryID {
-            finalizePartialEntry(id: partialID)
+            finalizeSystemPartialEntry(id: partialID)
         }
 
         cleanupSystemAudio()
@@ -154,6 +153,12 @@ class TranslationOrchestrator: ObservableObject {
 
     func startMic() async {
         guard !isMicRunning else { return }
+
+        if settings.isMicrophoneMixExperimentEnabled {
+            errorMessage = "raw mix 실험 모드에서는 별도 마이크 스트림 대신 시작 버튼만 사용하세요."
+            return
+        }
+
         isMicStopping = false
 
         let stt = SonioxSTT()
@@ -220,7 +225,7 @@ class TranslationOrchestrator: ObservableObject {
         micCaptureService.stopCapture()
 
         if let partialID = micPartialEntryID {
-            finalizePartialEntry(id: partialID)
+            finalizeMicPartialEntry(id: partialID)
         }
 
         cleanupMic()
@@ -238,13 +243,11 @@ class TranslationOrchestrator: ObservableObject {
         micSentenceCount = 0
     }
 
-    // MARK: - Soniox 업데이트 처리
+    // MARK: - Soniox 업데이트 처리 (시스템)
 
     private func handleSonioxUpdate(_ update: SonioxUpdate) {
         guard isRunning, !isStopping else { return }
 
-        // Soniox stableText는 endpoint까지 계속 누적됨.
-        // 5문장 분리로 이미 확정된 부분을 제외한 "현재 엔트리" 텍스트만 추출
         let currentStableOriginal = String(update.stableText.dropFirst(consumedStableOriginalCount))
         let currentStableTranslation = String(update.stableTranslation.dropFirst(consumedStableTranslationCount))
 
@@ -255,19 +258,17 @@ class TranslationOrchestrator: ObservableObject {
 
         guard !fullOriginal.isEmpty else { return }
 
-        // 화자 변경 감지 → 현재 엔트리 확정 후 새 엔트리 시작
         if let newSpeaker = update.speaker,
            let current = currentSpeaker,
            newSpeaker != current,
            let entryID = currentPartialEntryID {
-            finalizePartialEntry(id: entryID)
+            finalizeSystemPartialEntry(id: entryID)
             consumedStableOriginalCount = update.stableText.count
             consumedStableTranslationCount = update.stableTranslation.count
         }
 
         currentSpeaker = update.speaker
 
-        // 5문장 도달 체크 — 현재 엔트리의 stableText 기준
         let sentenceCount = countSentences(in: currentStableOriginal)
         if sentenceCount >= maxSentencesPerEntry,
            let entryID = currentPartialEntryID,
@@ -281,35 +282,32 @@ class TranslationOrchestrator: ObservableObject {
             entries[index].isFinalized = true
             currentPartialEntryID = nil
             currentSentenceCount = 0
-            // 소비된 위치 업데이트 — 다음 엔트리는 여기서부터 시작
             consumedStableOriginalCount = update.stableText.count
             consumedStableTranslationCount = update.stableTranslation.count
-            print("[Oratio] 엔트리 분리 (\(sentenceCount)문장): \"\(trimmedOriginal.prefix(60))\"")
-            // unstable 부분은 다음 업데이트에서 새 엔트리로 생성됨
+            print("[Oratio] 시스템 엔트리 분리 (\(sentenceCount)문장): \"\(trimmedOriginal.prefix(60))\"")
             return
         }
         currentSentenceCount = sentenceCount
 
-        // 현재 엔트리 업데이트 또는 생성
         if let existingID = currentPartialEntryID,
            let index = entries.firstIndex(where: { $0.id == existingID }) {
             entries[index].originalText = fullOriginal
             entries[index].translatedText = fullTranslation.isEmpty ? nil : fullTranslation
             entries[index].speaker = update.speaker
+            entries[index].source = .systemAudio
         } else {
             let newEntry = TranslationEntry(
                 originalText: fullOriginal,
                 translatedText: fullTranslation.isEmpty ? nil : fullTranslation,
-                speaker: update.speaker
+                speaker: update.speaker,
+                source: .systemAudio
             )
             entries.append(newEntry)
             currentPartialEntryID = newEntry.id
             lastAddedEntryID = newEntry.id
             currentSentenceCount = 0
-            print("[Oratio] 새 엔트리 생성 (speaker: \(update.speaker ?? "-"))")
         }
 
-        // Endpoint 감지 → 엔트리 확정
         if update.isEndpoint {
             if let entryID = currentPartialEntryID {
                 if let index = entries.firstIndex(where: { $0.id == entryID }) {
@@ -320,18 +318,16 @@ class TranslationOrchestrator: ObservableObject {
                         entries[index].translatedText = trimmedTranslation.isEmpty ? nil : trimmedTranslation
                     }
                     entries[index].isFinalized = true
-                    print("[Oratio] 엔트리 확정 (endpoint): \"\(trimmedOriginal.prefix(60))\"")
                 }
                 currentPartialEntryID = nil
                 currentSentenceCount = 0
             }
-            // Endpoint 후 Soniox가 stableText를 리셋하므로 consumed 카운터도 리셋
             consumedStableOriginalCount = 0
             consumedStableTranslationCount = 0
         }
     }
 
-    // MARK: - 마이크 업데이트 처리
+    // MARK: - Soniox 업데이트 처리 (마이크)
 
     private func handleMicSonioxUpdate(_ update: SonioxUpdate) {
         guard isMicRunning, !isMicStopping else { return }
@@ -343,7 +339,6 @@ class TranslationOrchestrator: ObservableObject {
 
         guard !fullOriginal.isEmpty else { return }
 
-        // 5문장 도달 체크
         let sentenceCount = countSentences(in: update.stableText)
         if sentenceCount >= maxSentencesPerEntry,
            let entryID = micPartialEntryID,
@@ -361,11 +356,11 @@ class TranslationOrchestrator: ObservableObject {
         }
         micSentenceCount = sentenceCount
 
-        // 현재 엔트리 업데이트 또는 생성
         if let existingID = micPartialEntryID,
            let index = entries.firstIndex(where: { $0.id == existingID }) {
             entries[index].originalText = fullOriginal
             entries[index].translatedText = fullTranslation.isEmpty ? nil : fullTranslation
+            entries[index].source = .microphone
         } else {
             let newEntry = TranslationEntry(
                 originalText: fullOriginal,
@@ -378,7 +373,6 @@ class TranslationOrchestrator: ObservableObject {
             micSentenceCount = 0
         }
 
-        // Endpoint 감지 → 엔트리 확정
         if update.isEndpoint {
             if let entryID = micPartialEntryID {
                 if let index = entries.firstIndex(where: { $0.id == entryID }) {
@@ -434,7 +428,38 @@ class TranslationOrchestrator: ObservableObject {
 
     // MARK: - 유틸리티
 
-    /// stableText 내 문장 수 카운트 (마침표/물음표/느낌표 + 공백 기준)
+    private func configureAudioPipeline(for stt: SonioxSTT, isMixExperimentEnabled: Bool) {
+        if isMixExperimentEnabled {
+            let mixer = AudioMixingService(
+                micGainDb: settings.mixMicrophoneGainDb,
+                micDelayMs: settings.mixMicrophoneDelayMs
+            )
+            mixer.onMixedPCMBuffer = { [weak stt] buffer in
+                guard let data = buffer.int16Data() else { return }
+                Task {
+                    try? await stt?.sendAudioData(data)
+                }
+            }
+            audioMixingService = mixer
+
+            audioCaptureService.onAudioPCMBuffer = { [weak mixer] buffer in
+                mixer?.appendSystemAudioBuffer(buffer)
+            }
+            rawMixMicrophoneCaptureService.onAudioPCMBuffer = { [weak mixer] buffer in
+                mixer?.appendMicrophoneBuffer(buffer)
+            }
+        } else {
+            audioMixingService = nil
+            rawMixMicrophoneCaptureService.onAudioPCMBuffer = nil
+            audioCaptureService.onAudioPCMBuffer = { [weak stt] buffer in
+                guard let data = buffer.int16Data() else { return }
+                Task {
+                    try? await stt?.sendAudioData(data)
+                }
+            }
+        }
+    }
+
     private func countSentences(in text: String) -> Int {
         var count = 0
         let chars = Array(text)
@@ -444,22 +469,30 @@ class TranslationOrchestrator: ObservableObject {
                 if nextIdx < chars.count && chars[nextIdx] == " " {
                     count += 1
                 } else if nextIdx == chars.count {
-                    count += 1 // 마지막 문자가 구두점
+                    count += 1
                 }
             }
         }
         return count
     }
 
-    private func finalizePartialEntry(id: UUID) {
+    private func finalizeSystemPartialEntry(id: UUID) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[index].isFinalized = true
         currentPartialEntryID = nil
     }
 
+    private func finalizeMicPartialEntry(id: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[index].isFinalized = true
+        micPartialEntryID = nil
+    }
+
     private func cleanupSystemAudio() {
         soniox = nil
+        audioMixingService = nil
         audioCaptureService.onAudioPCMBuffer = nil
+        rawMixMicrophoneCaptureService.onAudioPCMBuffer = nil
         currentPartialEntryID = nil
         currentSpeaker = nil
         currentSentenceCount = 0

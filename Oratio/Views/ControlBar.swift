@@ -5,6 +5,7 @@ import SwiftUI
 struct ControlBar: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.openSettings) private var openSettingsAction
+    @ObservedObject private var settings = AppSettings.shared
     private var textScale: CGFloat { appState.textScale }
 
     var body: some View {
@@ -48,6 +49,10 @@ struct ControlBar: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .disabled(settings.isMicrophoneMixExperimentEnabled)
+                .help(settings.isMicrophoneMixExperimentEnabled
+                    ? "raw mix 실험 모드에서는 별도 마이크 스트림을 비활성화합니다."
+                    : "마이크 입력 번역")
 
                 // 상태 인디케이터 + 오디오 레벨 미터
                 if appState.orchestrator.isRunning || appState.orchestrator.isMicRunning {

@@ -61,7 +61,7 @@ class AppState: ObservableObject {
 
     /// orchestrator.isRunning의 편의 프록시
     var isTranslating: Bool {
-        orchestrator.isRunning
+        orchestrator.isRunning || orchestrator.isMicRunning
     }
 
     /// orchestrator의 현재 상태 메시지
@@ -69,7 +69,16 @@ class AppState: ObservableObject {
         if let error = orchestrator.errorMessage {
             return "에러: \(error)"
         }
-        return orchestrator.isRunning ? "캡처 중" : "대기 중"
+        if orchestrator.isRunning && orchestrator.isMicRunning {
+            return "시스템 + 마이크 캡처 중"
+        }
+        if orchestrator.isRunning {
+            return "시스템 오디오 캡처 중"
+        }
+        if orchestrator.isMicRunning {
+            return "마이크 캡처 중"
+        }
+        return "대기 중"
     }
 
     init() {
@@ -77,9 +86,13 @@ class AppState: ObservableObject {
         self.textScale = storedScale > 0 ? CGFloat(storedScale) : 1.0
 
         let audioService = AudioCaptureService()
+        let micService = MicCaptureService()
+        let rawMixMicrophoneService = MicrophoneCaptureService()
         self.audioCaptureService = audioService
         self.orchestrator = TranslationOrchestrator(
-            audioCaptureService: audioService
+            audioCaptureService: audioService,
+            micCaptureService: micService,
+            rawMixMicrophoneCaptureService: rawMixMicrophoneService
         )
 
         // orchestrator의 변경을 AppState로 전파하여 UI 갱신
