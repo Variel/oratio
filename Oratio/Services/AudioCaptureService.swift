@@ -96,6 +96,7 @@ class AudioCaptureService: NSObject, ObservableObject {
 
     /// 48kHz → 16kHz 리샘플링 컨버터
     private var audioConverter: AVAudioConverter?
+    private var lastLargeBufferLogDate: Date?
 
     // MARK: - 권한 확인
 
@@ -169,8 +170,9 @@ class AudioCaptureService: NSObject, ObservableObject {
         // 비디오 설정 - 오디오만 필요하지만 유효한 해상도가 필수 (macOS 15+)
         configuration.width = max(Int(display.width), 2)
         configuration.height = max(Int(display.height), 2)
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1) // 최소 프레임레이트
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60) // 오디오 지연을 줄이기 위해 디스플레이 프레임 간격도 낮게 유지
         configuration.showsCursor = false
+        configuration.queueDepth = 1 // 불필요한 내부 버퍼링 최소화
 
         // 오디오 활성화
         configuration.capturesAudio = true
@@ -448,6 +450,8 @@ extension AudioCaptureService: SCStreamOutput {
         guard CMSampleBufferIsValid(sampleBuffer) else { return }
         guard CMSampleBufferGetNumSamples(sampleBuffer) > 0 else { return }
 
+        logLargeAudioBufferIfNeeded(sampleBuffer)
+
         // 콜백 1: CMSampleBuffer 원본 전달
         onAudioSampleBuffer?(sampleBuffer)
 
@@ -469,5 +473,30 @@ extension AudioCaptureService: SCStreamOutput {
 
             onAudioPCMBuffer?(outputBuffer)
         }
+    }
+
+    private func logLargeAudioBufferIfNeeded(_ sampleBuffer: CMSampleBuffer) {
+        let sampleCount = CMSampleBufferGetNumSamples(sampleBuffer)
+        guard sampleCount > 0,
+              let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbdPointer = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
+            return
+        }
+
+        let sourceSampleRate = asbdPointer.pointee.mSampleRate
+        guard sourceSampleRate > 0 else { return }
+
+        let durationSeconds = Double(sampleCount) / sourceSampleRate
+        guard durationSeconds >= 0.5 else { return }
+
+        let now = Date()
+        if let lastLargeBufferLogDate,
+           now.timeIntervalSince(lastLargeBufferLogDate) < 2.0 {
+            return
+        }
+
+        lastLargeBufferLogDate = now
+        let durationMs = Int((durationSeconds * 1000.0).rounded())
+        print("[AudioCaptureService] 큰 시스템 오디오 버퍼 감지: 약 \(durationMs)ms (\(sampleCount) samples)")
     }
 }

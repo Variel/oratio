@@ -17,11 +17,13 @@ final class AudioMixingService {
     private let duckedSystemGain: Float = 0.22
     private let normalSystemGain: Float = 1.0
     private let duckHoldChunkCount = 12 // 약 120ms @ 10ms chunks
+    private let maxChunksPerDrain = 4 // 한 번에 너무 많이 비우지 않아 다른 입력이 끼어들 수 있게 함
 
     private var systemQueue = SampleQueue()
     private var micQueue = SampleQueue()
     private var pendingMicDelaySamples: Int
     private var remainingDuckChunks = 0
+    private var isDrainScheduled = false
 
     init(micGainDb: Double, micDelayMs: Double) {
         self.micLinearGain = Float(pow(10.0, micGainDb / 20.0))
@@ -37,6 +39,7 @@ final class AudioMixingService {
             micQueue.removeAll()
             pendingMicDelaySamples = configuredMicDelaySamples
             remainingDuckChunks = 0
+            isDrainScheduled = false
         }
     }
 
@@ -46,7 +49,7 @@ final class AudioMixingService {
         queue.async { [weak self] in
             guard let self else { return }
             self.systemQueue.append(contentsOf: samples)
-            self.emitMixedChunksIfNeeded()
+            self.scheduleDrainIfNeeded()
         }
     }
 
@@ -62,7 +65,7 @@ final class AudioMixingService {
         queue.async { [weak self] in
             guard let self else { return }
             self.micQueue.append(contentsOf: samples)
-            self.emitMixedChunksIfNeeded()
+            self.scheduleDrainIfNeeded()
         }
     }
 
@@ -74,9 +77,26 @@ final class AudioMixingService {
         }
     }
 
-    private func emitMixedChunksIfNeeded() {
-        while shouldEmitChunk {
+    private func drainAvailableChunks() {
+        var emittedChunks = 0
+        while emittedChunks < maxChunksPerDrain, shouldEmitChunk {
             emitMixedChunk(frameCount: chunkSize)
+            emittedChunks += 1
+        }
+
+        isDrainScheduled = false
+
+        if shouldEmitChunk {
+            scheduleDrainIfNeeded()
+        }
+    }
+
+    private func scheduleDrainIfNeeded() {
+        guard !isDrainScheduled, shouldEmitChunk else { return }
+        isDrainScheduled = true
+
+        queue.async { [weak self] in
+            self?.drainAvailableChunks()
         }
     }
 
