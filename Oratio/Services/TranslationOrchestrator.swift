@@ -27,10 +27,12 @@ class TranslationOrchestrator: ObservableObject {
 
     private var soniox: SonioxSTT?
     private var audioMixingService: AudioMixingService?
+    private var systemAudioPump: SonioxAudioPump?
 
     // MARK: - Soniox STT (마이크용)
 
     private var micSoniox: SonioxSTT?
+    private var micAudioPump: SonioxAudioPump?
 
     // MARK: - 상태 관리 (시스템 오디오)
 
@@ -72,6 +74,10 @@ class TranslationOrchestrator: ObservableObject {
 
         let stt = SonioxSTT()
         self.soniox = stt
+        self.systemAudioPump = SonioxAudioPump(
+            stt: stt,
+            label: "ing.unlimit.oratio.systemAudioPump"
+        )
 
         await stt.setHandlers(
             onUpdate: { [weak self] update in
@@ -146,7 +152,10 @@ class TranslationOrchestrator: ObservableObject {
         audioMixingService?.flush()
 
         let stt = soniox
+        let pump = systemAudioPump
         Task {
+            await pump?.flush()
+            pump?.close()
             await stt?.setHandlers(onUpdate: nil, onError: nil)
             await stt?.stop()
         }
@@ -173,6 +182,10 @@ class TranslationOrchestrator: ObservableObject {
 
         let stt = SonioxSTT()
         self.micSoniox = stt
+        self.micAudioPump = SonioxAudioPump(
+            stt: stt,
+            label: "ing.unlimit.oratio.micAudioPump"
+        )
 
         await stt.setHandlers(
             onUpdate: { [weak self] update in
@@ -187,11 +200,10 @@ class TranslationOrchestrator: ObservableObject {
             }
         )
 
-        micCaptureService.onAudioPCMBuffer = { [weak stt] buffer in
+        let micPump = micAudioPump
+        micCaptureService.onAudioPCMBuffer = { [weak micPump] buffer in
             guard let data = buffer.int16Data() else { return }
-            Task {
-                try? await stt?.sendAudioData(data)
-            }
+            micPump?.append(data)
         }
 
         do {
@@ -227,7 +239,10 @@ class TranslationOrchestrator: ObservableObject {
         micCaptureService.onAudioPCMBuffer = nil
 
         let stt = micSoniox
+        let pump = micAudioPump
         Task {
+            await pump?.flush()
+            pump?.close()
             await stt?.setHandlers(onUpdate: nil, onError: nil)
             await stt?.stop()
         }
@@ -439,16 +454,15 @@ class TranslationOrchestrator: ObservableObject {
     // MARK: - 유틸리티
 
     private func configureAudioPipeline(for stt: SonioxSTT, isMixExperimentEnabled: Bool) {
+        let systemPump = systemAudioPump
         if isMixExperimentEnabled {
             let mixer = AudioMixingService(
                 micGainDb: settings.mixMicrophoneGainDb,
                 micDelayMs: settings.mixMicrophoneDelayMs
             )
-            mixer.onMixedPCMBuffer = { [weak stt] buffer in
+            mixer.onMixedPCMBuffer = { [weak systemPump] buffer in
                 guard let data = buffer.int16Data() else { return }
-                Task {
-                    try? await stt?.sendAudioData(data)
-                }
+                systemPump?.append(data)
             }
             audioMixingService = mixer
 
@@ -461,11 +475,9 @@ class TranslationOrchestrator: ObservableObject {
         } else {
             audioMixingService = nil
             rawMixMicrophoneCaptureService.onAudioPCMBuffer = nil
-            audioCaptureService.onAudioPCMBuffer = { [weak stt] buffer in
+            audioCaptureService.onAudioPCMBuffer = { [weak systemPump] buffer in
                 guard let data = buffer.int16Data() else { return }
-                Task {
-                    try? await stt?.sendAudioData(data)
-                }
+                systemPump?.append(data)
             }
         }
     }
@@ -501,6 +513,7 @@ class TranslationOrchestrator: ObservableObject {
     private func cleanupSystemAudio() {
         soniox = nil
         audioMixingService = nil
+        systemAudioPump = nil
         audioCaptureService.onAudioPCMBuffer = nil
         rawMixMicrophoneCaptureService.onAudioPCMBuffer = nil
         currentPartialEntryID = nil
@@ -513,8 +526,100 @@ class TranslationOrchestrator: ObservableObject {
 
     private func cleanupMic() {
         micSoniox = nil
+        micAudioPump = nil
         micCaptureService.onAudioPCMBuffer = nil
         micPartialEntryID = nil
         micSentenceCount = 0
+    }
+}
+
+private final class SonioxAudioPump: @unchecked Sendable {
+    private let stt: SonioxSTT
+    private let queue: DispatchQueue
+    private let bytesPerChunk: Int
+    private let samplesPerChunk: Int
+
+    private var pending = Data()
+    private var isSending = false
+    private var isClosed = false
+    private var lastBacklogLogDate: Date?
+
+    init(stt: SonioxSTT, label: String, chunkDurationMs: Int = 40) {
+        self.stt = stt
+        self.queue = DispatchQueue(label: label, qos: .userInteractive)
+        self.samplesPerChunk = max(1, chunkDurationMs) * SonioxSTT.sampleRate / 1_000
+        self.bytesPerChunk = samplesPerChunk * SonioxSTT.numChannels * MemoryLayout<Int16>.size
+    }
+
+    func append(_ data: Data) {
+        guard !data.isEmpty else { return }
+
+        queue.async { [weak self] in
+            guard let self, !self.isClosed else { return }
+            self.pending.append(data)
+            self.logBacklogIfNeeded()
+            self.scheduleNextSendIfNeeded()
+        }
+    }
+
+    func flush() async {
+        let chunks: [Data] = queue.sync {
+            guard !isClosed, !pending.isEmpty else { return [] }
+
+            var drainedChunks: [Data] = []
+            while !pending.isEmpty {
+                let chunkSize = min(bytesPerChunk, pending.count)
+                drainedChunks.append(pending.prefix(chunkSize))
+                pending.removeFirst(chunkSize)
+            }
+            return drainedChunks
+        }
+
+        for chunk in chunks {
+            try? await stt.sendAudioData(chunk)
+        }
+    }
+
+    func close() {
+        queue.sync {
+            isClosed = true
+            pending.removeAll(keepingCapacity: false)
+            isSending = false
+        }
+    }
+
+    private func scheduleNextSendIfNeeded() {
+        guard !isClosed, !isSending, pending.count >= bytesPerChunk else { return }
+
+        let chunk = pending.prefix(bytesPerChunk)
+        pending.removeFirst(bytesPerChunk)
+        isSending = true
+
+        Task { [weak self, stt] in
+            try? await stt.sendAudioData(chunk)
+            self?.queue.async { [weak self] in
+                guard let self else { return }
+                self.isSending = false
+                self.scheduleNextSendIfNeeded()
+            }
+        }
+    }
+
+    private func logBacklogIfNeeded() {
+        guard bytesPerChunk > 0 else { return }
+
+        let queuedSamples = pending.count / (SonioxSTT.numChannels * MemoryLayout<Int16>.size)
+        let queuedDurationMs = Int((Double(queuedSamples) / Double(SonioxSTT.sampleRate) * 1000.0).rounded())
+        guard queuedDurationMs >= 500 else { return }
+
+        let now = Date()
+        if let lastBacklogLogDate,
+           now.timeIntervalSince(lastBacklogLogDate) < 2.0 {
+            return
+        }
+
+        lastBacklogLogDate = now
+        let approxChunkCount = max(1, queuedSamples / samplesPerChunk)
+        print("[SonioxAudioPump] 송신 backlog 감지: 약 \(queuedDurationMs)ms (\(approxChunkCount) chunks)")
     }
 }
