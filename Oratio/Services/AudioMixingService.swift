@@ -10,13 +10,18 @@ final class AudioMixingService {
         qos: .userInteractive
     )
 
-    private let chunkSize = 320 // 20ms @ 16kHz
+    private let chunkSize = 160 // 10ms @ 16kHz
     private let micLinearGain: Float
     private let configuredMicDelaySamples: Int
+    private let micActivityThreshold: Float = 0.015
+    private let duckedSystemGain: Float = 0.22
+    private let normalSystemGain: Float = 1.0
+    private let duckHoldChunkCount = 12 // 약 120ms @ 10ms chunks
 
     private var systemQueue = SampleQueue()
     private var micQueue = SampleQueue()
     private var pendingMicDelaySamples: Int
+    private var remainingDuckChunks = 0
 
     init(micGainDb: Double, micDelayMs: Double) {
         self.micLinearGain = Float(pow(10.0, micGainDb / 20.0))
@@ -31,6 +36,7 @@ final class AudioMixingService {
             systemQueue.removeAll()
             micQueue.removeAll()
             pendingMicDelaySamples = configuredMicDelaySamples
+            remainingDuckChunks = 0
         }
     }
 
@@ -83,12 +89,24 @@ final class AudioMixingService {
     private func emitMixedChunk(frameCount: Int) {
         let systemSamples = systemQueue.popFirst(frameCount, padWithZeros: true)
         let micSamples = delayedMicSamples(frameCount: frameCount)
+        let micPeak = micSamples.reduce(Float.zero) { partialResult, sample in
+            max(partialResult, abs(sample))
+        }
+
+        if micPeak >= micActivityThreshold {
+            remainingDuckChunks = duckHoldChunkCount
+        } else if remainingDuckChunks > 0 {
+            remainingDuckChunks -= 1
+        }
+
+        let systemGain = remainingDuckChunks > 0 ? duckedSystemGain : normalSystemGain
 
         var mixedSamples = Array(repeating: Float.zero, count: frameCount)
         var hasSignal = false
 
         for index in 0..<frameCount {
-            let sample = max(-1.0, min(1.0, systemSamples[index] + micSamples[index]))
+            let mixed = (systemSamples[index] * systemGain) + micSamples[index]
+            let sample = max(-1.0, min(1.0, mixed))
             mixedSamples[index] = sample
             if !hasSignal, abs(sample) > 0.000_1 {
                 hasSignal = true

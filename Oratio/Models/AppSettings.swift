@@ -48,9 +48,9 @@ class AppSettings: ObservableObject {
         self.isMicrophoneMixExperimentEnabled = UserDefaults.standard.object(forKey: Keys.isMicrophoneMixExperimentEnabled) as? Bool ?? false
 
         let storedGain = UserDefaults.standard.object(forKey: Keys.mixMicrophoneGainDb) as? Double
-        self.mixMicrophoneGainDb = storedGain ?? -12.0
+        self.mixMicrophoneGainDb = storedGain ?? -6.0
 
         let storedDelay = UserDefaults.standard.object(forKey: Keys.mixMicrophoneDelayMs) as? Double
-        self.mixMicrophoneDelayMs = storedDelay ?? 20.0
+        self.mixMicrophoneDelayMs = storedDelay ?? 10.0
     }
 }
