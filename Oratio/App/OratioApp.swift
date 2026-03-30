@@ -48,6 +48,7 @@ class AppState: ObservableObject {
 
     /// AudioCaptureService 참조 (오디오 레벨 표시용)
     let audioCaptureService: AudioCaptureService
+    let rawMixMicrophoneCaptureService: MicrophoneCaptureService
 
     @Published var isPanelVisible: Bool = false
     @Published var textScale: CGFloat {
@@ -89,6 +90,7 @@ class AppState: ObservableObject {
         let micService = MicCaptureService()
         let rawMixMicrophoneService = MicrophoneCaptureService()
         self.audioCaptureService = audioService
+        self.rawMixMicrophoneCaptureService = rawMixMicrophoneService
         self.orchestrator = TranslationOrchestrator(
             audioCaptureService: audioService,
             micCaptureService: micService,
@@ -97,6 +99,24 @@ class AppState: ObservableObject {
 
         // orchestrator의 변경을 AppState로 전파하여 UI 갱신
         orchestrator.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+
+        audioService.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+
+        micService.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+
+        rawMixMicrophoneService.objectWillChange
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
             }

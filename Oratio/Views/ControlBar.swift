@@ -63,6 +63,17 @@ struct ControlBar: View {
                                 .frame(width: 6, height: 6)
                             AudioLevelMeter(level: appState.audioCaptureService.audioLevel)
                                 .frame(width: 30, height: 10)
+
+                            if settings.isMicrophoneMixExperimentEnabled {
+                                Circle()
+                                    .fill(Color.orange)
+                                    .frame(width: 6, height: 6)
+                                AudioLevelMeter(
+                                    level: appState.rawMixMicrophoneCaptureService.audioLevel,
+                                    barColor: .orange
+                                )
+                                .frame(width: 30, height: 10)
+                            }
                         }
                         if appState.orchestrator.isMicRunning {
                             Circle()

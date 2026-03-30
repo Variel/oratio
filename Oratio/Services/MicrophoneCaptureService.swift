@@ -89,8 +89,9 @@ final class MicrophoneCaptureService: NSObject, ObservableObject {
         inputNode.removeTap(onBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
             guard let self else { return }
+            guard let ownedBuffer = self.copyBuffer(buffer) else { return }
             self.processingQueue.async { [weak self] in
-                self?.handleInputBuffer(buffer)
+                self?.handleInputBuffer(ownedBuffer)
             }
         }
 
@@ -140,6 +141,42 @@ final class MicrophoneCaptureService: NSObject, ObservableObject {
         }
 
         onAudioPCMBuffer?(outputBuffer)
+    }
+
+    private func copyBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let copiedBuffer = AVAudioPCMBuffer(
+            pcmFormat: buffer.format,
+            frameCapacity: buffer.frameLength
+        ) else {
+            return nil
+        }
+
+        copiedBuffer.frameLength = buffer.frameLength
+
+        let bytesPerFrame = Int(buffer.format.streamDescription.pointee.mBytesPerFrame)
+        let frameCount = Int(buffer.frameLength)
+        let channelCount = Int(buffer.format.channelCount)
+
+        if buffer.format.isInterleaved {
+            guard let source = buffer.floatChannelData?[0],
+                  let destination = copiedBuffer.floatChannelData?[0] else {
+                return nil
+            }
+            memcpy(destination, source, frameCount * bytesPerFrame)
+            return copiedBuffer
+        }
+
+        guard let sourceChannelData = buffer.floatChannelData,
+              let destinationChannelData = copiedBuffer.floatChannelData else {
+            return nil
+        }
+
+        let bytesPerChannel = frameCount * MemoryLayout<Float>.size
+        for channel in 0..<channelCount {
+            memcpy(destinationChannelData[channel], sourceChannelData[channel], bytesPerChannel)
+        }
+
+        return copiedBuffer
     }
 
     private func resampleToTarget(_ sourceBuffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
