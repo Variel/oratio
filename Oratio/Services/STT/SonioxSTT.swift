@@ -46,6 +46,39 @@ struct SonioxUpdate {
     let isEndpoint: Bool
 }
 
+enum SonioxTranslationMode {
+    case oneWay(targetLanguage: String)
+    case twoWay(languageA: String, languageB: String)
+
+    var config: SonioxTranslationConfig {
+        switch self {
+        case .oneWay(let targetLanguage):
+            return SonioxTranslationConfig(
+                type: "one_way",
+                targetLanguage: targetLanguage,
+                languageA: nil,
+                languageB: nil
+            )
+        case .twoWay(let languageA, let languageB):
+            return SonioxTranslationConfig(
+                type: "two_way",
+                targetLanguage: nil,
+                languageA: languageA,
+                languageB: languageB
+            )
+        }
+    }
+
+    var debugDescription: String {
+        switch self {
+        case .oneWay(let targetLanguage):
+            return "one_way → \(targetLanguage)"
+        case .twoWay(let languageA, let languageB):
+            return "two_way \(languageA) ↔ \(languageB)"
+        }
+    }
+}
+
 // MARK: - SonioxSTT
 
 /// Soniox 실시간 WebSocket 기반 음성 인식 + 번역 서비스
@@ -114,7 +147,7 @@ actor SonioxSTT {
     func connect(
         apiKey: String,
         languageHints: [String] = ["en"],
-        targetLanguage: String = "ko"
+        translationMode: SonioxTranslationMode = .oneWay(targetLanguage: "ko")
     ) async throws {
         guard !apiKey.isEmpty else {
             throw SonioxError.apiKeyMissing
@@ -140,8 +173,6 @@ actor SonioxSTT {
         isReceiving = true
         Task { await self.receiveLoop() }
 
-        let sourceLanguage = languageHints.first ?? "en"
-
         // 설정 메시지 전송 (번역 포함)
         let config = SonioxConfigMessage(
             apiKey: apiKey,
@@ -153,15 +184,13 @@ actor SonioxSTT {
             maxEndpointDelayMs: Self.maxEndpointDelayMs,
             enableSpeakerDiarization: true,
             languageHints: languageHints,
-            translation: SonioxTranslationConfig(
-                type: "one_way",
-                targetLanguage: targetLanguage
-            ),
+            translation: translationMode.config,
             clientReferenceID: UUID().uuidString
         )
 
         try await sendEncodable(config)
-        print("[SonioxSTT] 연결 완료 (model: \(Self.model), translation: \(sourceLanguage)→\(targetLanguage), diarization: on)")
+        let joinedLanguageHints = languageHints.joined(separator: ",")
+        print("[SonioxSTT] 연결 완료 (model: \(Self.model), translation: \(translationMode.debugDescription), languageHints: \(joinedLanguageHints), diarization: on)")
     }
 
     // MARK: - 오디오 전송
@@ -358,13 +387,17 @@ actor SonioxSTT {
 
 // MARK: - Soniox Protocol Messages
 
-private struct SonioxTranslationConfig: Encodable {
+struct SonioxTranslationConfig: Encodable {
     let type: String
-    let targetLanguage: String
+    let targetLanguage: String?
+    let languageA: String?
+    let languageB: String?
 
     enum CodingKeys: String, CodingKey {
         case type
         case targetLanguage = "target_language"
+        case languageA = "language_a"
+        case languageB = "language_b"
     }
 }
 

@@ -41,6 +41,7 @@ class TranslationOrchestrator: ObservableObject {
     private let maxSentencesPerEntry = 5
     private var consumedStableOriginalCount: Int = 0
     private var consumedStableTranslationCount: Int = 0
+    private var isSystemRunRawMixExperiment: Bool = false
 
     // MARK: - 상태 관리 (마이크)
 
@@ -86,6 +87,7 @@ class TranslationOrchestrator: ObservableObject {
         )
 
         let isMixExperimentEnabled = settings.isMicrophoneMixExperimentEnabled
+        isSystemRunRawMixExperiment = isMixExperimentEnabled
         if isMixExperimentEnabled, isMicRunning {
             print("[Oratio] raw mix 실험 시작 전 기존 마이크 전용 파이프라인을 정리합니다.")
             stopMic()
@@ -106,7 +108,15 @@ class TranslationOrchestrator: ObservableObject {
         }
 
         do {
-            try await stt.connect(apiKey: settings.sonioxApiKey)
+            let translationMode: SonioxTranslationMode = isMixExperimentEnabled
+                ? .twoWay(languageA: "en", languageB: "ko")
+                : .oneWay(targetLanguage: "ko")
+            let languageHints = isMixExperimentEnabled ? ["en", "ko"] : ["en"]
+            try await stt.connect(
+                apiKey: settings.sonioxApiKey,
+                languageHints: languageHints,
+                translationMode: translationMode
+            )
         } catch {
             errorMessage = "Soniox 연결 실패: \(error.localizedDescription)"
             rawMixMicrophoneCaptureService.stopCapture()
@@ -117,7 +127,7 @@ class TranslationOrchestrator: ObservableObject {
 
         isRunning = true
         if isMixExperimentEnabled {
-            print("[Oratio] ===== 시스템 파이프라인 시작 (raw mix 실험) =====")
+            print("[Oratio] ===== 시스템 파이프라인 시작 (raw mix 실험, Soniox en↔ko two-way) =====")
         } else {
             print("[Oratio] ===== 시스템 파이프라인 시작 (Soniox STT + 실시간 번역 en→ko) =====")
         }
@@ -196,7 +206,7 @@ class TranslationOrchestrator: ObservableObject {
             try await stt.connect(
                 apiKey: settings.sonioxApiKey,
                 languageHints: ["ko"],
-                targetLanguage: "en"
+                translationMode: .oneWay(targetLanguage: "en")
             )
         } catch {
             errorMessage = "마이크 Soniox 연결 실패: \(error.localizedDescription)"
@@ -294,13 +304,13 @@ class TranslationOrchestrator: ObservableObject {
             entries[index].originalText = fullOriginal
             entries[index].translatedText = fullTranslation.isEmpty ? nil : fullTranslation
             entries[index].speaker = update.speaker
-            entries[index].source = .systemAudio
+            entries[index].source = isSystemRunRawMixExperiment ? .rawMix : .systemAudio
         } else {
             let newEntry = TranslationEntry(
                 originalText: fullOriginal,
                 translatedText: fullTranslation.isEmpty ? nil : fullTranslation,
                 speaker: update.speaker,
-                source: .systemAudio
+                source: isSystemRunRawMixExperiment ? .rawMix : .systemAudio
             )
             entries.append(newEntry)
             currentPartialEntryID = newEntry.id
@@ -498,6 +508,7 @@ class TranslationOrchestrator: ObservableObject {
         currentSentenceCount = 0
         consumedStableOriginalCount = 0
         consumedStableTranslationCount = 0
+        isSystemRunRawMixExperiment = false
     }
 
     private func cleanupMic() {

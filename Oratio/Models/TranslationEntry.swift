@@ -4,6 +4,7 @@ import Foundation
 enum AudioSource {
     case systemAudio   // 시스템 오디오 (상대방 음성) — 영어→한국어
     case microphone    // 마이크 입력 (내 음성) — 한국어→영어
+    case rawMix        // 시스템 오디오 + 마이크 단일 스트림 — 영어↔한국어
 }
 
 /// 번역 항목 데이터 모델

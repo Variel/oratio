@@ -50,7 +50,7 @@ struct TranslationView: View {
                     .font(.system(size: 12 * textScale))
                     .foregroundColor(.secondary)
                 if settings.isMicrophoneMixExperimentEnabled {
-                    Text("raw mix · mic \(Int(settings.mixMicrophoneDelayMs.rounded()))ms · \(Int(settings.mixMicrophoneGainDb.rounded()))dB")
+                    Text("raw mix · en↔ko · mic \(Int(settings.mixMicrophoneDelayMs.rounded()))ms · \(Int(settings.mixMicrophoneGainDb.rounded()))dB")
                         .font(.system(size: 10 * textScale, weight: .medium))
                         .foregroundColor(.orange)
                 }
@@ -146,8 +146,10 @@ struct TranslationEntryRow: View {
 
     /// 마이크 소스 색상
     private static let micColor: Color = .cyan
+    private static let rawMixColor: Color = .orange
 
     private var isMic: Bool { entry.source == .microphone }
+    private var isRawMix: Bool { entry.source == .rawMix }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -160,6 +162,22 @@ struct TranslationEntryRow: View {
                     Text("나 (한→영)")
                         .font(.system(size: 10 * textScale, weight: .semibold))
                         .foregroundColor(Self.micColor)
+                }
+                .padding(.bottom, 2)
+            } else if isRawMix {
+                HStack(spacing: 6) {
+                    Label("raw mix", systemImage: "waveform")
+                        .font(.system(size: 10 * textScale, weight: .semibold))
+                        .foregroundColor(Self.rawMixColor)
+
+                    if let speaker = entry.speaker {
+                        Circle()
+                            .fill(speakerColor(for: speaker))
+                            .frame(width: 8, height: 8)
+                        Text("Speaker \(speaker)")
+                            .font(.system(size: 10 * textScale, weight: .semibold))
+                            .foregroundColor(speakerColor(for: speaker))
+                    }
                 }
                 .padding(.bottom, 2)
             } else if showSpeakerLabel, let speaker = entry.speaker {
@@ -177,7 +195,11 @@ struct TranslationEntryRow: View {
             // 원문 - 작은 폰트
             Text(entry.originalText)
                 .font(.system(size: 12 * textScale))
-                .foregroundColor(isMic ? Self.micColor.opacity(0.7) : .secondary)
+                .foregroundColor(
+                    isMic
+                        ? Self.micColor.opacity(0.7)
+                        : (isRawMix ? Self.rawMixColor.opacity(0.8) : .secondary)
+                )
 
             // 번역 텍스트
             if let translation = entry.translatedText, !translation.isEmpty {
@@ -185,7 +207,9 @@ struct TranslationEntryRow: View {
                     .font(.system(size: 15 * textScale, weight: .medium))
                     .foregroundColor(isMic
                         ? (entry.isFinalized ? Self.micColor : Self.micColor.opacity(0.6))
-                        : (entry.isFinalized ? .primary : .secondary))
+                        : (isRawMix
+                            ? (entry.isFinalized ? .primary : Self.rawMixColor.opacity(0.8))
+                            : (entry.isFinalized ? .primary : .secondary)))
             } else if !entry.originalText.isEmpty {
                 Text("번역 중...")
                     .font(.system(size: 13 * textScale))
@@ -202,9 +226,13 @@ struct TranslationEntryRow: View {
         .frame(maxWidth: .infinity, alignment: isMic ? .trailing : .leading)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isMic
-                    ? Self.micColor.opacity(entry.isFinalized ? 0.10 : 0.05)
-                    : (entry.isFinalized ? Color.green.opacity(0.08) : Color.secondary.opacity(0.05)))
+                .fill(
+                    isMic
+                        ? Self.micColor.opacity(entry.isFinalized ? 0.10 : 0.05)
+                        : (isRawMix
+                            ? Self.rawMixColor.opacity(entry.isFinalized ? 0.10 : 0.05)
+                            : (entry.isFinalized ? Color.green.opacity(0.08) : Color.secondary.opacity(0.05)))
+                )
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
@@ -223,6 +251,9 @@ struct TranslationEntryRow: View {
     private var leftBarColor: Color {
         if isMic {
             return Self.micColor
+        }
+        if isRawMix {
+            return Self.rawMixColor
         }
         if let speaker = entry.speaker {
             return speakerColor(for: speaker)

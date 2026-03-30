@@ -25,7 +25,7 @@ struct SettingsView: View {
             Section("입력 실험") {
                 Toggle("시스템 오디오 + 마이크 합성 실험", isOn: $settings.isMicrophoneMixExperimentEnabled)
 
-                Text("실험 모드에서는 시스템 오디오와 마이크를 echo suppression 없이 합쳐서 Soniox에 보냅니다. 설정 변경은 다음 시작부터 적용돼요.")
+                Text("실험 모드에서는 시스템 오디오와 마이크를 echo suppression 없이 합쳐서 Soniox 단일 세션(en↔ko 양방향 번역)으로 보냅니다. 설정 변경은 다음 시작부터 적용돼요.")
                     .font(.caption)
                     .foregroundColor(.secondary)
 
